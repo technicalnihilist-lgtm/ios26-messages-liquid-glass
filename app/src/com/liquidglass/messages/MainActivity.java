@@ -9,8 +9,10 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.provider.ContactsContract;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -49,6 +51,7 @@ public class MainActivity extends Activity {
     private static final String BG = "#111111";
     private static final int REQ_PERMS = 2001;
     private static final int REQ_ROLE = 2002;
+    private static final int REQ_CONTACTS = 2003;
 
     private WebView web;
     private String pendingAddress;
@@ -242,11 +245,67 @@ public class MainActivity extends Activity {
         requestPermissions(ask.toArray(new String[0]), REQ_PERMS);
     }
 
+    private boolean hasContactsPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        return checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void askContactsPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || hasContactsPermission()) {
+            js("window.__onContactsReady && window.__onContactsReady()");
+            return;
+        }
+        requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS}, REQ_CONTACTS);
+    }
+
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
         pushStatus();
         js("window.__onSmsStatus && window.__onSmsStatus()");
+        if (code == REQ_CONTACTS) {
+            js("window.__onContactsReady && window.__onContactsReady()");
+        }
+    }
+
+    // -------------------------------------------------------------- contacts
+
+    private String contactsJson() {
+        JSONArray out = new JSONArray();
+        if (!hasContactsPermission()) return out.toString();
+        Cursor c = null;
+        Map<String, JSONObject> seen = new LinkedHashMap<>();
+        try {
+            c = getContentResolver().query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    new String[]{ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                            ContactsContract.CommonDataKinds.Phone.NUMBER},
+                    null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
+            if (c != null) {
+                while (c.moveToNext() && seen.size() < 1000) {
+                    String name = c.getString(0);
+                    String number = c.getString(1);
+                    if (number == null || number.trim().isEmpty()) continue;
+                    String key = number.replaceAll("[^0-9+]", "");
+                    if (key.length() < 6 || seen.containsKey(key)) continue;
+                    JSONObject o = new JSONObject();
+                    o.put("name", name == null || name.trim().isEmpty() ? number : name);
+                    o.put("number", number);
+                    seen.put(key, o);
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (c != null) c.close();
+        }
+        for (JSONObject o : seen.values()) out.put(o);
+        return out.toString();
+    }
+
+    // --------------------------------------------------------------- prefs
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences("liquidglass", Context.MODE_PRIVATE);
     }
 
     boolean isDefaultSmsApp() {
@@ -471,6 +530,33 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void deleteMessage(long id) {
             MainActivity.this.deleteMessage(id);
+        }
+
+        @JavascriptInterface
+        public String loadContacts() {
+            return contactsJson();
+        }
+
+        @JavascriptInterface
+        public boolean hasContactsPermission() {
+            return MainActivity.this.hasContactsPermission();
+        }
+
+        @JavascriptInterface
+        public void requestContactsPermission() {
+            runOnUiThread(new Runnable() {
+                @Override public void run() { askContactsPermission(); }
+            });
+        }
+
+        @JavascriptInterface
+        public String getPref(String key, String def) {
+            try { return prefs().getString(key, def); } catch (Exception e) { return def; }
+        }
+
+        @JavascriptInterface
+        public void setPref(String key, String value) {
+            try { prefs().edit().putString(key, value).apply(); } catch (Exception ignored) {}
         }
     }
 

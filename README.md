@@ -30,11 +30,11 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.0 (versionCode 5) |
+| Version | 2.1 (versionCode 6) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~58 KB |
-| Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, notifications |
+| Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, notifications |
 | Internet | **not requested** — the app cannot reach the network at all |
 
 ## What works
@@ -46,8 +46,11 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
   are adjustable at runtime.
 - **Starts empty** — no demo chats, no sample messages. The inbox opens on
   *No Conversations* and fills up with whatever you create.
-- **New chat** — tap the compose button, type a phone number, hit **Start chat**.
-  The conversation opens immediately, ready to type into.
+- **New chat, two ways** — tap the compose button and type a phone number, or tap
+  the **+** button beside the message field to pick anyone from your contacts
+  (searchable list, straight into a chat).
+- **Settings stick** — transparency, blur, bounce strength/speed, the bounce toggle
+  and the theme are saved the moment you change them and restored on next launch.
 - **Real SMS** — your actual conversations are read from the phone's SMS store,
   messages are sent through `SmsManager`, and incoming texts are written back into
   that store, so nothing is lost.
@@ -88,9 +91,9 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 |---|---|
 | ![](screenshots/07-settings.png) | ![](screenshots/09-context-menu.png) |
 
-| Long-press conversation → delete | Default messaging app prompt |
-|---|---|
-| ![](screenshots/10-row-menu.png) | ![](screenshots/12-default-app.png) |
+| Long-press conversation → delete | Default messaging app prompt | Pick a contact |
+|---|---|---|
+| ![](screenshots/10-row-menu.png) | ![](screenshots/12-default-app.png) | ![](screenshots/13-contacts.png) |
 
 ## Project layout
 
@@ -123,6 +126,19 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 2.1
+
+- **The `+` button works**: it opens a searchable contact picker (real contacts, via
+  `READ_CONTACTS`) and jumps straight into a chat with whoever you tap.
+- **Settings and theme persist**: transparency, blur, bounce strength/speed, the
+  bounce switch and light/dark are stored in native `SharedPreferences` and restored
+  on launch. Picking light keeps light, picking dark keeps dark — the system theme no
+  longer overrides your choice after a restart.
+- **Thread header fixed**: the back chevron and the contact title were overlapping;
+  the bar is now a proper three-column layout with an ellipsised title, and it stays
+  readable on devices where the blur is weak.
+- Fixed contact avatars sometimes rendering with no colour.
 
 ## What's new in 2.0 — real messaging
 
@@ -181,7 +197,7 @@ you get a notification saying so, instead of the message vanishing silently.
   without it, the glass falls back to a solid tint; the app stays fully usable.
 - `window.__androidBack()` is the bridge the Java layer calls from `onBackPressed()`.
 - The JS bridge (`Android.*`) is deliberately narrow: clipboard copy, SMS read/send/
-  delete, permission and role requests. There is no network access and no file access
+  delete, contact lookup, preference get/set, permission and role requests. There is no network access and no file access
   beyond the bundled assets.
 - Everything SMS-related goes through the standard provider (`content://sms`), so
   other SMS apps can still read the same store if you switch back.

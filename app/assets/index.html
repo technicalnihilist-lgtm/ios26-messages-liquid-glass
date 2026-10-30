@@ -42,8 +42,11 @@ h1{font-size:34px;margin:6px 20px 8px;letter-spacing:-.5px}
 .dl{align-self:flex-end;font-size:12px;color:var(--tx2);margin:3px 4px 0}
 .typing{display:flex;gap:4px;padding:12px 14px}.typing i{width:8px;height:8px;border-radius:50%;background:#8e8e93;animation:ty 1s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
 @keyframes ty{50%{transform:translateY(-4px);opacity:.5}}
-.ttl{position:absolute;left:50%;transform:translateX(-50%);text-align:center;font-size:11px;font-weight:600;line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;top:0;height:100%}
+.ttl{flex:1;min-width:0;text-align:center;font-size:11px;font-weight:600;line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
 .ttl .av{width:24px;height:24px;font-size:12px}
+.ttl span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar.glass{background:rgba(var(--gtint),.72)}
+.gbtn#back{flex:none;width:36px;padding:0}
 .input{position:absolute;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 10px);display:flex;gap:8px;align-items:flex-end;z-index:5}
 .field{flex:1;min-height:42px;border-radius:22px;display:flex;align-items:center;padding:0 6px 0 16px;gap:6px}
 .field input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:17px;color:var(--tx);user-select:text}
@@ -93,9 +96,9 @@ input[type=range]{width:100%;accent-color:var(--out)}
    <div id="rows"></div></div>
  </div>
  <div class="screen thread" id="thread">
-  <div class="bar glass"><button class="gbtn" id="back">‹ Back</button><div class="ttl" id="ttl"></div><div style="width:60px"></div></div>
+  <div class="bar glass"><button class="gbtn" id="back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="ttl" id="ttl"></div><div style="width:36px;flex:none"></div></div>
   <div class="scroll" id="tscroll" style="padding-top:calc(env(safe-area-inset-top,0px) + 86px)"><div class="msgs" id="msgs"></div></div>
-  <div class="input"><button class="plus glass" aria-label="More"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="input"><button class="plus glass" id="plus" aria-label="Contacts"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
    <div class="field glass"><input id="txt" placeholder="iMessage" autocomplete="off"><button class="send" id="send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div></div>
  </div>
  <div class="scrim" id="scrim"></div>
@@ -111,6 +114,10 @@ input[type=range]{width:100%;accent-color:var(--out)}
  <button class="done glass" id="askDefault">Set as default</button>
  <button class="done glass" data-close>Done</button></div>
  <div class="sheet glass" id="sNew"><h2>New message</h2><div class="newto"><input id="newName" placeholder="To: name" autocomplete="off" enterkeyhint="go"></div><button class="start" id="startChat" disabled>Start chat</button><button class="done glass" data-close>Cancel</button></div>
+<div class="sheet glass" id="sContacts"><h2>Contacts</h2>
+ <div class="search glass" style="margin:0 0 10px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="cq" placeholder="Search contacts"></div>
+ <div id="clist" style="max-height:46vh;overflow-y:auto"></div>
+ <button class="done glass" data-close>Cancel</button></div>
 <div class="sheet glass" id="sDefault"><h2>Default messaging app</h2>
  <p class="perm">Set Messages as your default SMS app so your texts land here. Incoming messages are saved to your phone&#39;s own SMS store — nothing leaves the device.</p>
  <button class="start" id="setDefault">Set as default</button>
@@ -129,7 +136,7 @@ function fmtTime(ms){if(!ms)return'';const d=new Date(ms),n=new Date();
  if(d.toDateString()===n.toDateString())return hm;
  const y=new Date(n.getTime()-86400000);if(d.toDateString()===y.toDateString())return 'Yesterday';
  return d.toLocaleDateString(undefined,{weekday:'short'})}
-function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h^=h>>>13;return PALETTE[h%PALETTE.length]}
+function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
 function ini(s){const m=String(s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
 function loadThreads(){if(!BR)return;try{
  const openId=(cur!==null&&T[cur])?T[cur].id:null,openAddr=(cur!==null&&T[cur])?T[cur].addr:null;
@@ -212,15 +219,26 @@ function newChat(addr){const i=T.length;
  renderRows();openThread(i);return i}
 
 $('#scrim').onclick=closeSheets;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>setTimeout(closeSheets,100));
+function prefGet(k,d){try{if(BR&&BR.getPref){const v=BR.getPref(k,'');if(v!==null&&v!=='')return v}}catch(e){}
+ try{const v=localStorage.getItem('lg_'+k);if(v!==null)return v}catch(e){}return d}
+function prefSet(k,v){try{if(BR&&BR.setPref){BR.setPref(k,String(v));return}}catch(e){}
+ try{localStorage.setItem('lg_'+k,String(v))}catch(e){}}
+function saveCfg(){try{prefSet('ga',$('#r1').value);prefSet('blur',$('#r2').value);prefSet('k',$('#r3').value);
+ prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);prefSet('theme',R.dataset.theme||'light')}catch(e){}}
+function applyTheme(t){R.dataset.theme=t==='dark'?'dark':'light';const b=$('#td');if(b)b.classList.toggle('on',t==='dark')}
+$('#r1').value=prefGet('ga',28);$('#r2').value=prefGet('blur',22);
+$('#r3').value=prefGet('k',6);$('#r4').value=prefGet('sp',5);
+S.on=prefGet('bounce','1')==='1';
+applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
 bind('#r1','#v1',v=>R.style.setProperty('--ga',v/100),v=>v+'%');
 bind('#r2','#v2',v=>R.style.setProperty('--blur',v+'px'),v=>v+'px');
 bind('#r3','#v3',v=>{S.k=v/10;ease()},v=>v+'/10');
 bind('#r4','#v4',v=>{S.sp=v/10;ease()},v=>v+'/10');
+$('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';
 $('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
-$('#tb').onclick=function(){S.on=!S.on;this.classList.toggle('on',S.on);ease();$('#v3').textContent=S.on?$('#r3').value+'/10':'Off'};
-$('#td').onclick=function(){const d=!this.classList.contains('on');this.classList.toggle('on',d);R.dataset.theme=d?'dark':'light'};
-if(matchMedia('(prefers-color-scheme:dark)').matches)$('#td').classList.add('on');
+$('#tb').onclick=function(){S.on=!S.on;this.classList.toggle('on',S.on);ease();$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';saveCfg()};
+$('#td').onclick=function(){const d=!this.classList.contains('on');applyTheme(d?'dark':'light');saveCfg()};
 // ===== Long-press menu, delete, water sound =====
 let AC,MG;
 function actx(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)();const cp=AC.createDynamicsCompressor();MG=AC.createGain();MG.gain.value=1.5;MG.connect(cp);cp.connect(AC.destination)}catch(e){}}
@@ -330,6 +348,20 @@ RW.addEventListener('touchend',lpCancel);
 RW.addEventListener('contextmenu',e=>{e.preventDefault();const r=okRow(e);if(r&&!X.g){lpCancel();openAny(r)}});
 $('#setDefault').onclick=()=>{if(!BR)return;closeSheets();BR.requestSmsPermission();setTimeout(()=>BR.requestDefaultSms(),700)};
 $('#askDefault').onclick=()=>{if(!BR)return;BR.requestSmsPermission();setTimeout(()=>BR.requestDefaultSms(),700)};
+function renderContacts(q){if(!BR)return;let arr=[];
+ try{arr=JSON.parse(BR.loadContacts()||'[]')}catch(e){}
+ if(!arr||!arr.length){$('#clist').innerHTML='<p class="perm">Contacts access is off. Allow it, or tap the compose button and type a number.</p>';return}
+ const f=(q||'').toLowerCase().trim();
+ const list=arr.filter(c=>!f||(c.name||'').toLowerCase().includes(f)||(c.number||'').includes(f)).slice(0,200);
+ $('#clist').innerHTML=list.map(c=>{const nm=c.name||c.number||'';return `<div class="row cont" data-num="${String(c.number||'').replace(/"/g,'')}"><div class="av" style="background:${colorFor(nm)};width:40px;height:40px;font-size:17px">${ini(nm)}</div><div class="rt"><b>${nm}<small style="font-weight:400;font-size:13px">${c.number||''}</small></b></div></div>`}).join('')||'<p class="perm">No contact matches that.</p>'}
+function openContacts(){if(!BR)return;$('#cq').value='';renderContacts('');
+ if(!BR.hasContactsPermission()){try{BR.requestContactsPermission()}catch(e){}}
+ sheet('#sContacts');setTimeout(()=>renderContacts(''),400)}
+$('#plus').onclick=()=>openContacts();
+$('#cq').oninput=function(){renderContacts(this.value)};
+$('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=r.dataset.num;if(!num)return;
+ closeSheets();setTimeout(()=>{const k=T.findIndex(t=>t.addr===num);if(k>=0)openThread(k);else newChat(num)},300)};
+window.__onContactsReady=function(){const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
 window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#defState');if(el)el.textContent=on?'On':'Not set'};
 window.__onSmsChanged=function(){loadThreads();if(cur!==null){loadMsgs(cur);renderThread()}renderRows();if(window.__onSmsStatus)window.__onSmsStatus()};
 window.__composeTo=function(addr){if(!addr)return;const k=T.findIndex(t=>t.addr===addr);
