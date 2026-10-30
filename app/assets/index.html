@@ -70,6 +70,12 @@ input[type=range]{width:100%;accent-color:var(--out)}
 .ci svg{width:20px;height:20px}
 .ci.del{color:#ff3b30}
 .ghostrow:after{display:none}
+
+.newto{margin:0 0 12px}
+.newto input{width:100%;height:46px;border-radius:23px;padding:0 18px;font-size:17px;color:var(--tx);background:rgba(120,120,128,.14);border:1px solid var(--sep);outline:0;user-select:text;-webkit-user-select:text}
+.newto input::placeholder{color:var(--tx2)}
+.start{display:block;width:100%;padding:13px;border-radius:23px;background:var(--out);color:#fff;font-weight:600;font-size:17px;margin:0 0 6px;transition:opacity .2s}
+.start:disabled{opacity:.4}
 </style></head><body>
 <div class="phone" id="phone">
 <div class="blob" style="width:260px;height:260px;background:#ffd166;left:-60px;top:80px"></div>
@@ -99,15 +105,15 @@ input[type=range]{width:100%;accent-color:var(--out)}
   <div class="ctl"><label>Bounce speed <span id="v4"></span></label><input type="range" id="r4" min="1" max="10" value="5"></div>
   <div class="tg">Dark mode<button class="sw" id="td" aria-label="Toggle dark mode"></button></div>
   <button class="done glass" data-close>Done</button></div>
- <div class="sheet glass" id="sNew"><h2>New message</h2><div id="nlist"></div><button class="done glass" data-close>Cancel</button></div>
+ <div class="sheet glass" id="sNew"><h2>New message</h2><div class="newto"><input id="newName" placeholder="To: name" autocomplete="off" enterkeyhint="go"></div><button class="start" id="startChat" disabled>Start chat</button><button class="done glass" data-close>Cancel</button></div>
 </div>
 </div>
 <script>
 const $=s=>document.querySelector(s),R=document.documentElement;
 const S={on:true,k:.6,sp:.5};
-const people=[["Aanya","#ff6a88","Dinner at 8? I booked the corner table.","9:41"],["Rohan","#5e5ce6","Sent you the playlist, check it out","8:12"],["Mom","#30b0c7","Beta, call me when you are free","Yesterday"],["Design Team","#ff9f0a","Glass looks amazing on the new build!","Yesterday"],["Kabir","#34c759","Haha that was so good","Tuesday"],["Priya","#af52de","See you at the airport","Monday"]];
+const people=[];
 const T=people.map((p,i)=>({n:p[0],c:p[1],t:p[3],u:i==0||i==3,m:[{f:0,x:p[2]}]}));
-T[0].m.unshift({f:1,x:"Hey! Are we still on for tonight?"});
+const PALETTE=["#ff6a88","#5e5ce6","#30b0c7","#ff9f0a","#34c759","#af52de","#ff375f","#0a84ff"];
 const replies=["Sounds great! 😊","Haha okay","Wait, really?","On my way!","Let me check and tell you","Perfect, see you soon","😂😂","Okay done ✅"];
 let cur=null,busy=false;
 function ease(){const o=1+S.k*1.3;R.style.setProperty('--ease',`cubic-bezier(.3,${o.toFixed(2)},.5,1)`);R.style.setProperty('--dur',(0.9-S.sp*.6).toFixed(2)+'s');R.style.setProperty('--pd',S.on?(1-.14*S.k).toFixed(3):1)}
@@ -158,8 +164,15 @@ $('#back').onclick=()=>setTimeout(backThread,100);
 $('#send').onclick=sendMsg;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendMsg()};
 $('#q').oninput=renderRows;
 $('#edit').onclick=()=>setTimeout(()=>sheet('#sSet'),100);
-$('#compose').onclick=()=>{$('#nlist').innerHTML=T.map((t,i)=>`<div class="row cont" data-i="${i}"><div class="av" style="background:${t.c};width:40px;height:40px;font-size:17px">${t.n[0]}</div><div class="rt"><b>${t.n}</b></div></div>`).join('');setTimeout(()=>sheet('#sNew'),100)};
-$('#nlist').onclick=e=>{const r=e.target.closest('.row');if(r){closeSheets();setTimeout(()=>openThread(+r.dataset.i),300)}};
+$('#compose').onclick=()=>{$('#newName').value='';$('#startChat').disabled=true;setTimeout(()=>sheet('#sNew'),100)};
+$('#newName').oninput=function(){$('#startChat').disabled=!this.value.trim()};
+$('#newName').onkeydown=function(e){if(e.key==='Enter'&&this.value.trim())startChat()};
+$('#startChat').onclick=()=>startChat();
+function startChat(){const n=$('#newName').value.trim();if(!n)return;$('#newName').blur();closeSheets();setTimeout(()=>newChat(n),280)}
+function newChat(name){const i=T.length;
+ T.push({n:name,c:PALETTE[i%PALETTE.length],t:'Now',u:false,m:[]});
+ renderRows();openThread(i);return i}
+
 $('#scrim').onclick=closeSheets;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>setTimeout(closeSheets,100));
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
 bind('#r1','#v1',v=>R.style.setProperty('--ga',v/100),v=>v+'%');

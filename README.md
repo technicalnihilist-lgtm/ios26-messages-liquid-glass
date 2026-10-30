@@ -8,8 +8,8 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 
 <p align="center">
   <img src="screenshots/01-home.png" width="220" alt="Home screen">
-  <img src="screenshots/02-messages.png" width="220" alt="Message list">
-  <img src="screenshots/05-reply.png" width="220" alt="Conversation">
+  <img src="screenshots/02-messages.png" width="220" alt="Empty inbox">
+  <img src="screenshots/08-new-message.png" width="220" alt="Start a new chat">
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 1.2 (versionCode 3) |
+| Version | 1.3 (versionCode 4) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~50 KB |
@@ -43,17 +43,20 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 - **Spring / bounce motion** — a custom multi-keyframe spring curve drives app open,
   close, sheet presentation, message pop-in and press feedback. Strength and speed
   are adjustable at runtime.
-- **Messages list** — searchable, unread dots, relative timestamps, 1:1 and group
-  chats, tap-to-open with a parallax push transition.
-- **Conversation view** — sender/receiver bubbles, day stamp, "Delivered" receipt,
-  animated typing indicator and auto-reply.
+- **Starts empty** — no demo chats, no sample messages. The inbox opens on
+  *No Conversations* and fills up with whatever you create.
+- **New chat** — tap the compose button, type a name, hit **Start chat**. The
+  conversation opens immediately, ready to type into.
+- **Every message gets a reply** — send anything and the other side answers by
+  default (typing indicator first, then a bubble), so a fresh chat never sits dead.
+- **Messages list** — searchable, relative timestamps, 1:1 and group chats,
+  tap-to-open with a parallax push transition.
 - **Long-press any bubble** — a glass context menu opens with **Copy** (routed to the
   native Android clipboard) and **Delete** (bubble collapses, water droplets scatter
   and a synthesized water-splash sound plays — no audio files, all Web Audio).
 - **Long-press a conversation row** — the row lifts into a floating card with a
   **Delete** action; the chat collapses away with a softer water trickle. Clearing
   the last chat shows the *No Conversations* empty state.
-- **Compose sheet** — start a new chat from any contact.
 - **Settings sheet** — transparency %, blur radius, bounce strength/speed, bounce
   on/off, and a light/dark theme switch, all applied live.
 - **Hardware back button** — unwinds the UI (context menu → sheet → thread → app)
@@ -62,17 +65,21 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 
 ## Screenshots
 
-| Home | Messages | Conversation |
+| Home | Empty inbox | New chat |
 |---|---|---|
-| ![](screenshots/01-home.png) | ![](screenshots/02-messages.png) | ![](screenshots/03-thread.png) |
+| ![](screenshots/01-home.png) | ![](screenshots/02-messages.png) | ![](screenshots/08-new-message.png) |
+
+| Fresh conversation | Inbox after chatting |
+|---|---|
+| ![](screenshots/03-thread.png) | ![](screenshots/11-inbox.png) |
 
 | Typing | Reply | Dark |
 |---|---|---|
 | ![](screenshots/04-typing.png) | ![](screenshots/05-reply.png) | ![](screenshots/06-dark.png) |
 
-| Glass & Bounce settings | New message | Long-press bubble |
-|---|---|---|
-| ![](screenshots/07-settings.png) | ![](screenshots/08-new-message.png) | ![](screenshots/09-context-menu.png) |
+| Glass & Bounce settings | Long-press bubble |
+|---|---|
+| ![](screenshots/07-settings.png) | ![](screenshots/09-context-menu.png) |
 
 | Long-press conversation → delete |
 |---|
@@ -109,6 +116,16 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 1.3
+
+- **Demo content removed** — the six seeded chats and their messages are gone.
+  The app starts on an empty *No Conversations* inbox.
+- **New-chat flow** — the compose sheet now has a *To: name* field and a
+  **Start chat** button; no more picking from a hard-coded contact list.
+- **Default auto-reply** — every message you send gets an answer, so a brand-new
+  conversation behaves like a real one.
+- Screenshots re-rendered for the empty inbox, the new-chat sheet and a real inbox.
 
 ## What's new in 1.2
 
