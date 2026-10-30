@@ -69,6 +69,7 @@ input[type=range]{width:100%;accent-color:var(--out)}
 .ci{display:flex;width:100%;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:18px;font-size:17px}
 .ci svg{width:20px;height:20px}
 .ci.del{color:#ff3b30}
+.ghostrow:after{display:none}
 </style></head><body>
 <div class="phone" id="phone">
 <div class="blob" style="width:260px;height:260px;background:#ffd166;left:-60px;top:80px"></div>
@@ -127,7 +128,7 @@ function pop(el){if(!S.on)return;const k=S.k;el.animate([{transform:sc(.6)},{tra
 function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
 function renderRows(){const q=$('#q').value.toLowerCase();$('#rows').innerHTML=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
- return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${t.n[0]}</div><div class="rt"><b>${t.n}<small>${t.t}</small></b><p>${l.x}</p></div></div>`}).join('')}
+ return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${t.n[0]}</div><div class="rt"><b>${t.n}<small>${t.t}</small></b><p>${l.x}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>'}
 function renderThread(){const t=T[cur];$('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${t.n[0]}</div><span>${t.n}</span>`;
  let h='<div class="stamp"><b>Today</b> 9:38</div>',p=null;
  t.m.forEach((m,i)=>{h+=`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${m.x.replace(/</g,'&lt;')}</div>`;p=m.f});
@@ -152,7 +153,7 @@ function rel(){if(!pr)return;const el=pr;pr=null;el.style.transition=`transform 
 // wiring
 $('#openApp').onclick=()=>setTimeout(openApp,60);
 $('#closeApp').onclick=()=>setTimeout(closeApp,120);
-$('#rows').onclick=e=>{const r=e.target.closest('.row');if(r)setTimeout(()=>openThread(+r.dataset.i),120)};
+$('#rows').onclick=e=>{const r=e.target.closest('.row');if(r&&Date.now()-lpFired>700&&!X.g)setTimeout(()=>openThread(+r.dataset.i),120)};
 $('#back').onclick=()=>setTimeout(backThread,100);
 $('#send').onclick=sendMsg;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendMsg()};
 $('#q').oninput=renderRows;
@@ -200,7 +201,7 @@ function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected
  b.style.transition='none';b.style.transform=''; // undo press-scale so the measured box is the real one
  const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
  g.removeAttribute('data-i');g.style.cssText=`position:absolute;left:${r.left-A.left}px;top:${r.top-A.top}px;width:${r.width}px;margin:0;max-width:none;z-index:21`;
- $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;
+ $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='msg';$('#ctx .ci[data-a=copy]').style.display='';lpFired=Date.now();
  g.animate([{transform:'scale(1)'},{transform:'scale(1.1)',offset:.5},{transform:'scale(1.05)'}],{duration:350,easing:'ease-out',fill:'forwards'});
  const m=$('#ctx'),W=190,H=104,me=b.classList.contains('me');
  let left=me?r.right-A.left-W:r.left-A.left;left=Math.max(12,Math.min(A.width-W-12,left));
@@ -222,11 +223,11 @@ function doDelete(){if(!X.g)return;const g=X.g,b=X.b,i=X.i,ci=cur;X.g=null;X.b=n
  const a=g.animate([{transform:'scale(1.05)',opacity:1},{transform:'scale(1.15)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-6deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(8deg)',opacity:0}],{duration:S.on?520:200,easing:'ease-in',fill:'forwards'});
  a.onfinish=()=>{g.remove();collapse()}}
 $('#ctx').onclick=e=>{const it=e.target.closest('.ci');if(!it)return;unlockAudio();
- if(it.dataset.a==='del'){setTimeout(doDelete,120)}
+ if(it.dataset.a==='del'){const fn=X.k==='row'?doRowDelete:doDelete;setTimeout(fn,120)}
  else{setTimeout(()=>{try{navigator.clipboard.writeText(T[cur].m[X.i].x)}catch(_){}closeCtx();$('#scrim').classList.remove('on')},120)}};
 // long-press: pointer + touch + contextmenu so it works on phones and desktop
 let lp=null,lx=0,ly=0,lb=null;const M=$('#msgs');
-function lpStart(b,x,y){lx=x;ly=y;lb=b;clearTimeout(lp);lp=setTimeout(()=>{lp=null;if(lb&&lb.isConnected&&!X.g)openCtx(lb)},380)}
+function lpStart(b,x,y){lx=x;ly=y;lb=b;clearTimeout(lp);lp=setTimeout(()=>{lp=null;openAny(lb)},380)}
 function lpCancel(){clearTimeout(lp);lp=null}
 function lpMove(x,y){if(lp&&Math.hypot(x-lx,y-ly)>10)lpCancel()}
 const okBub=e=>{const b=e.target.closest&&e.target.closest('.bub');return b&&!b.classList.contains('typing')?b:null};
@@ -237,6 +238,45 @@ M.addEventListener('touchstart',e=>{const b=okBub(e);if(!b||lp||!e.touches[0])re
 M.addEventListener('touchmove',e=>{if(e.touches[0])lpMove(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
 M.addEventListener('touchend',lpCancel);
 M.addEventListener('contextmenu',e=>{e.preventDefault();const b=okBub(e);if(b&&!X.g){lpCancel();openCtx(b)}});
+// ===== contact (conversation row) long-press delete, with a softer water sound =====
+let lpFired=0;
+function openAny(el){if(!el||!el.isConnected||X.g)return;el.classList.contains('row')?openRowCtx(el):openCtx(el)}
+function splashSoft(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02;
+ const n=c.createBufferSource();n.buffer=noiseBuf(c,.4);const bp=c.createBiquadFilter();bp.type='bandpass';bp.Q.value=1.1;bp.frequency.setValueAtTime(2600,t);bp.frequency.exponentialRampToValueAtTime(1000,t+.25);
+ const ng=c.createGain();ng.gain.setValueAtTime(.0001,t);ng.gain.exponentialRampToValueAtTime(.22,t+.02);ng.gain.exponentialRampToValueAtTime(.0001,t+.3);
+ n.connect(bp);bp.connect(ng);ng.connect(MG);n.start(t);n.stop(t+.4);
+ bubble(c,t,320,.14,.32);for(let k=0;k<5;k++){bubble(c,t+.08+Math.random()*.45,600+Math.random()*1100,.05+Math.random()*.05,.16)}}
+function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null)return;closeCtx();
+ b.style.transition='none';b.style.transform='';
+ const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
+ g.removeAttribute('data-i');g.classList.add('ghostrow');
+ g.style.cssText=`position:absolute;left:${r.left-A.left+8}px;top:${r.top-A.top}px;width:${r.width-16}px;margin:0;z-index:21;background:var(--bg);border-radius:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)`;
+ $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='row';lpFired=Date.now();
+ g.animate([{transform:'scale(1)'},{transform:'scale(1.05)',offset:.5},{transform:'scale(1.03)'}],{duration:350,easing:'ease-out',fill:'forwards'});
+ const m=$('#ctx'),W=190,H=60;$('#ctx .ci[data-a=copy]').style.display='none';
+ const left=Math.max(12,Math.min(A.width-W-12,r.left-A.left+20));
+ let top=r.bottom-A.top+10,below=true;if(top+H>A.height-24){top=r.top-A.top-H-10;below=false}
+ m.style.left=left+'px';m.style.top=top+'px';m.style.transformOrigin='0% '+(below?'0%':'100%');
+ m.classList.add('on');$('#scrim').classList.add('on');
+ m.animate([{opacity:0},{opacity:1}],{duration:120});
+ spring(m,sc(.3),[sc(1+.1*S.k),sc(1-.04*S.k),sc(1+.015*S.k)],sc(1),700);
+ try{if(navigator.vibrate)navigator.vibrate(15)}catch(e){}}
+function doRowDelete(){if(!X.g||X.k!=='row')return;const g=X.g,b=X.b,i=X.i;X.g=null;X.b=null;hideMenu();$('#scrim').classList.remove('on');
+ splashSoft();const r=g.getBoundingClientRect(),A=$('#app').getBoundingClientRect();drops(r.left-A.left+r.width/2,r.top-A.top+r.height/2);
+ const finish=()=>{if(T[i])T.splice(i,1);renderRows()};
+ const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
+  const cs=getComputedStyle(b);b.style.overflow='hidden';b.animate([{height:b.offsetHeight+'px',paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:260,easing:'ease-out',fill:'forwards'}).onfinish=finish};
+ const a=g.animate([{transform:'scale(1.03)',opacity:1},{transform:'scale(1.1)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-4deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(6deg)',opacity:0}],{duration:S.on?460:200,easing:'ease-in',fill:'forwards'});
+ a.onfinish=()=>{g.remove();collapse()}}
+// long-press on the contact list
+const RW=$('#rows'),okRow=e=>e.target.closest&&e.target.closest('.row');
+RW.addEventListener('pointerdown',e=>{unlockAudio();const r=okRow(e);if(r)lpStart(r,e.clientX,e.clientY)});
+RW.addEventListener('pointermove',e=>lpMove(e.clientX,e.clientY));
+RW.addEventListener('pointerup',lpCancel);
+RW.addEventListener('touchstart',e=>{const r=okRow(e);if(!r||lp||!e.touches[0])return;lpStart(r,e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+RW.addEventListener('touchmove',e=>{if(e.touches[0])lpMove(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+RW.addEventListener('touchend',lpCancel);
+RW.addEventListener('contextmenu',e=>{e.preventDefault();const r=okRow(e);if(r&&!X.g){lpCancel();openAny(r)}});
 ease();renderRows();
 setTimeout(openApp,250);$('#app').classList.add('on');
 </script>
@@ -259,7 +299,7 @@ setTimeout(openApp,250);$('#app').classList.add('on');
     }
   } catch (e) {}
 
-  // 2. Hardware back: unwind sheet -> thread -> app before the app exits.
+  // 2. Hardware back: unwind menu -> sheet -> thread -> app before the app exits.
   window.__androidBack = function () {
     try {
       var cx = document.querySelector('#ctx');

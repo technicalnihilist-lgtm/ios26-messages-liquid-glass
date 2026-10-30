@@ -29,7 +29,7 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 1.1 (versionCode 2) |
+| Version | 1.2 (versionCode 3) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~50 KB |
@@ -50,6 +50,9 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 - **Long-press any bubble** — a glass context menu opens with **Copy** (routed to the
   native Android clipboard) and **Delete** (bubble collapses, water droplets scatter
   and a synthesized water-splash sound plays — no audio files, all Web Audio).
+- **Long-press a conversation row** — the row lifts into a floating card with a
+  **Delete** action; the chat collapses away with a softer water trickle. Clearing
+  the last chat shows the *No Conversations* empty state.
 - **Compose sheet** — start a new chat from any contact.
 - **Settings sheet** — transparency %, blur radius, bounce strength/speed, bounce
   on/off, and a light/dark theme switch, all applied live.
@@ -67,9 +70,13 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 |---|---|---|
 | ![](screenshots/04-typing.png) | ![](screenshots/05-reply.png) | ![](screenshots/06-dark.png) |
 
-| Glass & Bounce settings | New message | Long-press menu |
+| Glass & Bounce settings | New message | Long-press bubble |
 |---|---|---|
 | ![](screenshots/07-settings.png) | ![](screenshots/08-new-message.png) | ![](screenshots/09-context-menu.png) |
+
+| Long-press conversation → delete |
+|---|
+| ![](screenshots/10-row-menu.png) |
 
 ## Project layout
 
@@ -102,6 +109,15 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 1.2
+
+- Long-press a conversation row to delete the whole chat, with a softer water
+  trickle, droplet particles and a lift-and-collapse animation.
+- *No Conversations* empty state once the list is cleared.
+- Guard so a long-press never opens the chat by accident when you release.
+- Haptic nudge on the row menu (browser/PWA; the APK runs without the VIBRATE
+  permission by design, so there it is a silent no-op).
 
 ## What's new in 1.1
 
