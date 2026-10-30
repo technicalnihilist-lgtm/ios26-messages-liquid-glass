@@ -1,6 +1,9 @@
 package com.liquidglass.messages;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -8,6 +11,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -64,7 +68,6 @@ public class MainActivity extends Activity {
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.setVerticalScrollBarEnabled(false);
         web.setHorizontalScrollBarEnabled(false);
-        web.setLongClickable(false);
         web.setHapticFeedbackEnabled(true);
 
         web.setWebViewClient(new WebViewClient() {
@@ -75,9 +78,22 @@ public class MainActivity extends Activity {
             }
         });
         web.setWebChromeClient(new WebChromeClient());
+        web.addJavascriptInterface(new Bridge(), "Android");
 
         setContentView(web);
         web.loadUrl("file:///android_asset/index.html");
+    }
+
+    /** Minimal native bridge: the only thing the page can call is copy-to-clipboard. */
+    private class Bridge {
+        @JavascriptInterface
+        public void copy(String text) {
+            if (text == null) return;
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("message", text));
+            }
+        }
     }
 
     /**

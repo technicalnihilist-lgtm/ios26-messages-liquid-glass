@@ -4,7 +4,7 @@ A pixel-faithful recreation of the **iOS 26 Messages** app with Apple's *Liquid 
 aesthetic — rebuilt as a real, installable **Android APK**.
 
 The whole UI is one self-contained HTML file running inside a hardened, fully offline
-WebView shell. No internet permission, no trackers, no libraries, ~46 KB APK.
+WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 
 <p align="center">
   <img src="screenshots/01-home.png" width="220" alt="Home screen">
@@ -29,10 +29,10 @@ WebView shell. No internet permission, no trackers, no libraries, ~46 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 1.0 (versionCode 1) |
+| Version | 1.1 (versionCode 2) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~46 KB |
+| Size | ~50 KB |
 | Permissions | **none** |
 | Internet | not required — 100% offline |
 
@@ -47,11 +47,14 @@ WebView shell. No internet permission, no trackers, no libraries, ~46 KB APK.
   chats, tap-to-open with a parallax push transition.
 - **Conversation view** — sender/receiver bubbles, day stamp, "Delivered" receipt,
   animated typing indicator and auto-reply.
+- **Long-press any bubble** — a glass context menu opens with **Copy** (routed to the
+  native Android clipboard) and **Delete** (bubble collapses, water droplets scatter
+  and a synthesized water-splash sound plays — no audio files, all Web Audio).
 - **Compose sheet** — start a new chat from any contact.
 - **Settings sheet** — transparency %, blur radius, bounce strength/speed, bounce
   on/off, and a light/dark theme switch, all applied live.
-- **Hardware back button** — unwinds the UI (sheet → thread → app) instead of
-  dumping you out of the app.
+- **Hardware back button** — unwinds the UI (context menu → sheet → thread → app)
+  instead of dumping you out of the app.
 - **Dark mode** — follows the in-app switch, and the system theme on first launch.
 
 ## Screenshots
@@ -64,9 +67,9 @@ WebView shell. No internet permission, no trackers, no libraries, ~46 KB APK.
 |---|---|---|
 | ![](screenshots/04-typing.png) | ![](screenshots/05-reply.png) | ![](screenshots/06-dark.png) |
 
-| Glass & Bounce settings | New message |
-|---|---|
-| ![](screenshots/07-settings.png) | ![](screenshots/08-new-message.png) |
+| Glass & Bounce settings | New message | Long-press menu |
+|---|---|---|
+| ![](screenshots/07-settings.png) | ![](screenshots/08-new-message.png) | ![](screenshots/09-context-menu.png) |
 
 ## Project layout
 
@@ -100,6 +103,16 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
 
+## What's new in 1.1
+
+- Long-press context menu on every bubble: **Copy** and **Delete**.
+- Delete animation with droplet particles and a procedural water-splash sound
+  (Web Audio synthesis — the APK ships no audio files).
+- Copy goes through a native `ClipboardManager` bridge, because
+  `navigator.clipboard` is unreliable on `file://` inside a WebView.
+- Thread header avatar no longer overflows the navigation bar.
+- Full-bleed layout — the old 900 px preview cap that left a black strip is gone.
+
 ## Technical notes
 
 - The WebView is locked down: JavaScript and DOM storage are enabled (the UI needs
@@ -109,6 +122,9 @@ publishing to the Play Store**.
   that has received Play Store updates (effectively all of them). On the rare device
   without it, the glass falls back to a solid tint; the app stays fully usable.
 - `window.__androidBack()` is the bridge the Java layer calls from `onBackPressed()`.
+- The only native method exposed to the page is `Android.copy(text)` (clipboard).
+  `addJavascriptInterface` is limited to that single method, and the app loads only
+  local assets — nothing can be reached from the network.
 - Bubbles, avatars and all colour are original CSS — no Apple assets are bundled.
   This is a design study, not an Apple product, and is not affiliated with Apple Inc.
 
