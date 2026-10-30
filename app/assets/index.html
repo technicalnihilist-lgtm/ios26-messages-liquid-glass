@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Messages – Liquid Glass</title>
+<style>
+:root{--ga:.28;--blur:22px;--tx:#0b0b10;--tx2:rgba(60,60,67,.65);--sep:rgba(60,60,67,.18);--in:#e9e9eb;--intx:#000;--out:#0a84ff;--bg:#f2f2f7;--gtint:255,255,255;--gb:rgba(255,255,255,.55);--ease:cubic-bezier(.3,1.6,.5,1);--dur:.5s;--pd:.93;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root[data-theme=dark]{--tx:#fff;--tx2:rgba(235,235,245,.6);--sep:rgba(255,255,255,.14);--in:#2c2c2e;--intx:#fff;--bg:#000;--gtint:30,30,34;--gb:rgba(255,255,255,.18)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--tx:#fff;--tx2:rgba(235,235,245,.6);--sep:rgba(255,255,255,.14);--in:#2c2c2e;--intx:#fff;--bg:#000;--gtint:30,30,34;--gb:rgba(255,255,255,.18)}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{height:100%;margin:0;font-family:-apple-system,"SF Pro Text","Inter","Segoe UI",system-ui,sans-serif;background:#111;color:var(--tx);overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.phone{position:relative;margin:auto;width:min(100vw,430px);height:100%;max-height:none;overflow:hidden;background:linear-gradient(160deg,#ff9a8b,#ff6a88 25%,#7f5af0 60%,#2cb5e8);}
+@media(min-width:500px){html,body{display:flex}.phone{height:min(100dvh,860px);margin:auto;border-radius:44px;box-shadow:0 30px 80px #0008}}
+.blob{position:absolute;border-radius:50%;filter:blur(30px);opacity:.8}
+.glass{background:rgba(var(--gtint),var(--ga));backdrop-filter:blur(var(--blur)) saturate(190%);-webkit-backdrop-filter:blur(var(--blur)) saturate(190%);border:1px solid var(--gb);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -1px 2px rgba(255,255,255,.12),0 8px 24px rgba(0,0,0,.14)}
+.home{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding:0 0 70px}
+.dock{display:flex;gap:18px;padding:14px 20px;border-radius:34px}
+.icon{width:64px;height:64px;border-radius:15px;background:linear-gradient(#5df06b,#12b832);display:grid;place-items:center;box-shadow:0 4px 12px #0003}
+.icon svg{width:36px;height:36px}
+.app{position:absolute;inset:0;background:var(--bg);display:none;overflow:hidden;transform-origin:50% 92%}
+.app.on{display:block}
+.screen{position:absolute;inset:0;background:var(--bg);overflow:hidden}
+.screen.thread{transform:translateX(100%);background:var(--bg)}
+.scroll{position:absolute;inset:0;overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 62px) 0 100px;-webkit-overflow-scrolling:touch}
+.bar{position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 10px);height:46px;border-radius:26px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;z-index:5}
+.gbtn{min-width:36px;height:36px;border-radius:18px;display:grid;place-items:center;padding:0 10px;font-size:17px;color:var(--out)}
+.gbtn svg{width:19px;height:19px}
+h1{font-size:34px;margin:6px 20px 8px;letter-spacing:-.5px}
+.search{margin:0 16px 8px;height:38px;border-radius:19px;display:flex;align-items:center;gap:8px;padding:0 12px;color:var(--tx2)}
+.search input{flex:1;background:none;border:0;outline:0;font-size:17px;color:var(--tx);user-select:text;min-width:0}
+.row{display:flex;gap:12px;align-items:center;padding:10px 20px;position:relative}
+.row:after{content:"";position:absolute;left:84px;right:0;bottom:0;height:.5px;background:var(--sep)}
+.av{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:600;font-size:20px;flex:none}
+.rt{flex:1;min-width:0}.rt b{display:flex;justify-content:space-between;font-weight:600;font-size:17px}.rt b small{font-weight:400;color:var(--tx2);font-size:15px}
+.rt p{margin:2px 0 0;color:var(--tx2);font-size:15px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--out);position:absolute;left:6px;top:50%;margin-top:-5px}
+.msgs{display:flex;flex-direction:column;padding:0 14px}
+.bub{max-width:76%;padding:8px 13px;border-radius:19px;font-size:17px;line-height:1.28;margin-top:2px;word-wrap:break-word;user-select:text;position:relative}
+.me{align-self:flex-end;background:var(--out);color:#fff}.th{align-self:flex-start;background:var(--in);color:var(--intx)}
+.gap{margin-top:9px}
+.stamp{align-self:center;font-size:12px;color:var(--tx2);margin:10px 0 4px}
+.dl{align-self:flex-end;font-size:12px;color:var(--tx2);margin:3px 4px 0}
+.typing{display:flex;gap:4px;padding:12px 14px}.typing i{width:8px;height:8px;border-radius:50%;background:#8e8e93;animation:ty 1s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes ty{50%{transform:translateY(-4px);opacity:.5}}
+.ttl{position:absolute;left:50%;transform:translateX(-50%);text-align:center;font-size:11px;font-weight:600;line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;top:0;height:100%}
+.ttl .av{width:24px;height:24px;font-size:12px}
+.input{position:absolute;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 10px);display:flex;gap:8px;align-items:flex-end;z-index:5}
+.field{flex:1;min-height:42px;border-radius:22px;display:flex;align-items:center;padding:0 6px 0 16px;gap:6px}
+.field input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:17px;color:var(--tx);user-select:text}
+.send{width:30px;height:30px;border-radius:50%;background:var(--out);color:#fff;display:grid;place-items:center;transition:opacity .2s}
+.send svg{width:16px;height:16px}
+.plus{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:var(--tx2)}
+.scrim{position:absolute;inset:0;background:#0006;opacity:0;pointer-events:none;transition:opacity .3s;z-index:20}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:absolute;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);border-radius:34px;padding:20px 20px 24px;z-index:21;display:none;max-height:82%;overflow-y:auto}
+.sheet.on{display:block}
+.sheet h2{margin:0 0 14px;font-size:20px;text-align:center}
+.ctl{margin:14px 0}.ctl label{display:flex;justify-content:space-between;font-size:15px;margin-bottom:6px}.ctl label span{color:var(--tx2)}
+input[type=range]{width:100%;accent-color:var(--out)}
+.tg{display:flex;justify-content:space-between;align-items:center;margin:14px 0;font-size:16px}
+.sw{width:51px;height:31px;border-radius:16px;background:rgba(120,120,128,.4);position:relative;transition:background .25s}
+.sw:after{content:"";position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px #0004;transition:transform var(--dur) var(--ease)}
+.sw.on{background:#34c759}.sw.on:after{transform:translateX(20px)}
+.done{display:block;margin:10px auto 0;padding:10px 28px;border-radius:22px;color:var(--out);font-weight:600}
+.cont{padding:10px 8px}
+</style></head><body>
+<div class="phone" id="phone">
+<div class="blob" style="width:260px;height:260px;background:#ffd166;left:-60px;top:80px"></div>
+<div class="blob" style="width:300px;height:300px;background:#06d6a0;right:-100px;bottom:120px"></div>
+<div class="home"><div class="dock glass"><button class="icon" id="openApp" aria-label="Open Messages"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3C6.5 3 2 6.6 2 11c0 2.4 1.3 4.5 3.4 6C5.200 18.400 4.600 19.800 3.800 20.700c1.900-.1 3.600-.9 4.700-1.900.9.200 2.500.4 3.500.4 5.500 0 10-3.600 10-8S17.500 3 12 3z"/></svg></button></div></div>
+
+<div class="app" id="app">
+ <div class="screen" id="list">
+  <div class="bar glass"><button class="gbtn" id="edit">Settings</button><button class="gbtn" id="closeApp" aria-label="Close app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button><button class="gbtn" id="compose" aria-label="New message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4"/></svg></button></div>
+  <div class="scroll"><h1>Messages</h1>
+   <div class="search glass"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="q" placeholder="Search"></div>
+   <div id="rows"></div></div>
+ </div>
+ <div class="screen thread" id="thread">
+  <div class="bar glass"><button class="gbtn" id="back">‹ Back</button><div class="ttl" id="ttl"></div><div style="width:60px"></div></div>
+  <div class="scroll" id="tscroll" style="padding-top:calc(env(safe-area-inset-top,0px) + 86px)"><div class="msgs" id="msgs"></div></div>
+  <div class="input"><button class="plus glass" aria-label="More"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+   <div class="field glass"><input id="txt" placeholder="iMessage" autocomplete="off"><button class="send" id="send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div></div>
+ </div>
+ <div class="scrim" id="scrim"></div>
+ <div class="sheet glass" id="sSet"><h2>Glass &amp; Bounce</h2>
+  <div class="ctl"><label>Transparency <span id="v1"></span></label><input type="range" id="r1" min="0" max="80" value="28"></div>
+  <div class="ctl"><label>Blur <span id="v2"></span></label><input type="range" id="r2" min="0" max="50" value="22"></div>
+  <div class="tg">Bounce effect<button class="sw on" id="tb" aria-label="Toggle bounce"></button></div>
+  <div class="ctl"><label>Bounce strength <span id="v3"></span></label><input type="range" id="r3" min="1" max="10" value="6"></div>
+  <div class="ctl"><label>Bounce speed <span id="v4"></span></label><input type="range" id="r4" min="1" max="10" value="5"></div>
+  <div class="tg">Dark mode<button class="sw" id="td" aria-label="Toggle dark mode"></button></div>
+  <button class="done glass" data-close>Done</button></div>
+ <div class="sheet glass" id="sNew"><h2>New message</h2><div id="nlist"></div><button class="done glass" data-close>Cancel</button></div>
+</div>
+</div>
+<script>
+const $=s=>document.querySelector(s),R=document.documentElement;
+const S={on:true,k:.6,sp:.5};
+const people=[["Aanya","#ff6a88","Dinner at 8? I booked the corner table.","9:41"],["Rohan","#5e5ce6","Sent you the playlist, check it out","8:12"],["Mom","#30b0c7","Beta, call me when you are free","Yesterday"],["Design Team","#ff9f0a","Glass looks amazing on the new build!","Yesterday"],["Kabir","#34c759","Haha that was so good","Tuesday"],["Priya","#af52de","See you at the airport","Monday"]];
+const T=people.map((p,i)=>({n:p[0],c:p[1],t:p[3],u:i==0||i==3,m:[{f:0,x:p[2]}]}));
+T[0].m.unshift({f:1,x:"Hey! Are we still on for tonight?"});
+const replies=["Sounds great! 😊","Haha okay","Wait, really?","On my way!","Let me check and tell you","Perfect, see you soon","😂😂","Okay done ✅"];
+let cur=null,busy=false;
+function ease(){const o=1+S.k*1.3;R.style.setProperty('--ease',`cubic-bezier(.3,${o.toFixed(2)},.5,1)`);R.style.setProperty('--dur',(0.9-S.sp*.6).toFixed(2)+'s');R.style.setProperty('--pd',S.on?(1-.14*S.k).toFixed(3):1)}
+function spring(el,from,mid,to,dur,fill){ // Web Animations bounce
+ if(!S.on){el.animate([{transform:to}],{duration:1,fill:fill||'none'});return}
+ const d=(1.1-S.sp)*dur*(0.7+S.k*.6);
+ const a=el.animate([{transform:from,offset:0},{transform:mid[0],offset:.45},{transform:mid[1],offset:.7},{transform:mid[2],offset:.88},{transform:to,offset:1}],{duration:d,easing:'ease-out',fill:fill||'none'});return a}
+const up=1+.1*S.k;
+function sc(v){return `scale(${v})`}
+function openApp(){const a=$('#app');a.classList.add('on');const k=S.k;
+ spring(a,sc(.25),[sc(1+.07*k),sc(1-.03*k),sc(1+.012*k)],sc(1),1000);a.animate([{opacity:0},{opacity:1}],{duration:200})}
+function closeApp(){const a=$('#app');const k=S.k;
+ if(!S.on){a.classList.remove('on');return}
+ const d=(1.1-S.sp)*650*(0.7+k*.6);
+ const an=a.animate([{transform:'scale(1)'},{transform:sc(1+.06*k),offset:.3},{transform:sc(.2),opacity:0}],{duration:d,easing:'ease-in'});
+ an.onfinish=()=>a.classList.remove('on')}
+function pop(el){if(!S.on)return;const k=S.k;el.animate([{transform:sc(.6)},{transform:sc(1+.12*k),offset:.55},{transform:sc(1-.04*k),offset:.8},{transform:sc(1)}],{duration:(1.1-S.sp)*520,easing:'ease-out'})}
+function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
+ el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
+function renderRows(){const q=$('#q').value.toLowerCase();$('#rows').innerHTML=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1];
+ return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${t.n[0]}</div><div class="rt"><b>${t.n}<small>${t.t}</small></b><p>${l.x}</p></div></div>`}).join('')}
+function renderThread(){const t=T[cur];$('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${t.n[0]}</div><span>${t.n}</span>`;
+ let h='<div class="stamp"><b>Today</b> 9:38</div>',p=null;
+ t.m.forEach((m,i)=>{h+=`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}">${m.x.replace(/</g,'&lt;')}</div>`;p=m.f});
+ if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)h+='<div class="dl">Delivered</div>';
+ if(t.typing)h+='<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>';
+ $('#msgs').innerHTML=h;const s=$('#tscroll');s.scrollTop=s.scrollHeight}
+function openThread(i){cur=i;T[i].u=false;renderThread();slide($('#thread'),100);$('#list').style.transition='transform .5s';$('#list').style.transform='translateX(-25%)'}
+function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
+function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
+ const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
+ const ci=cur;t.typing=true;setTimeout(()=>{if(cur===ci){renderThread();const e=[...document.querySelectorAll('.typing')].pop();e&&pop(e)}},500);
+ setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('.bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
+function sheet(id){$('#scrim').classList.add('on');const s=$(id);s.classList.add('on');spring(s,'translateY(110%)',['translateY(-'+(2+S.k*10)+'px)','translateY('+(S.k*4)+'px)','translateY(-'+S.k*2+'px)'],'translateY(0)',700)}
+function closeSheets(){document.querySelectorAll('.sheet.on').forEach(s=>{if(!S.on){s.classList.remove('on');return}
+ const a=s.animate([{transform:'translateY(0)'},{transform:'translateY(-'+S.k*8+'px)',offset:.25},{transform:'translateY(110%)'}],{duration:(1.1-S.sp)*400,easing:'ease-in'});a.onfinish=()=>s.classList.remove('on')});$('#scrim').classList.remove('on')}
+// press bounce on everything touchable
+let pr=null;
+const SEL='button,.row,.bub,.av,.search,.field,.sheet .ctl input,.cont,.dock,.sw';
+document.addEventListener('pointerdown',e=>{const el=e.target.closest(SEL);if(!el||el.type==='range'||!S.on)return;pr=el;el.style.transition='transform .14s ease-out';el.style.transform=`scale(${getComputedStyle(R).getPropertyValue('--pd')})`});
+function rel(){if(!pr)return;const el=pr;pr=null;el.style.transition=`transform var(--dur) var(--ease)`;el.style.transform='';setTimeout(()=>{el.style.transition=''},900)}
+['pointerup','pointercancel','pointerleave'].forEach(n=>document.addEventListener(n,rel));
+// wiring
+$('#openApp').onclick=()=>setTimeout(openApp,60);
+$('#closeApp').onclick=()=>setTimeout(closeApp,120);
+$('#rows').onclick=e=>{const r=e.target.closest('.row');if(r)setTimeout(()=>openThread(+r.dataset.i),120)};
+$('#back').onclick=()=>setTimeout(backThread,100);
+$('#send').onclick=sendMsg;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendMsg()};
+$('#q').oninput=renderRows;
+$('#edit').onclick=()=>setTimeout(()=>sheet('#sSet'),100);
+$('#compose').onclick=()=>{$('#nlist').innerHTML=T.map((t,i)=>`<div class="row cont" data-i="${i}"><div class="av" style="background:${t.c};width:40px;height:40px;font-size:17px">${t.n[0]}</div><div class="rt"><b>${t.n}</b></div></div>`).join('');setTimeout(()=>sheet('#sNew'),100)};
+$('#nlist').onclick=e=>{const r=e.target.closest('.row');if(r){closeSheets();setTimeout(()=>openThread(+r.dataset.i),300)}};
+$('#scrim').onclick=closeSheets;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>setTimeout(closeSheets,100));
+function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
+bind('#r1','#v1',v=>R.style.setProperty('--ga',v/100),v=>v+'%');
+bind('#r2','#v2',v=>R.style.setProperty('--blur',v+'px'),v=>v+'px');
+bind('#r3','#v3',v=>{S.k=v/10;ease()},v=>v+'/10');
+bind('#r4','#v4',v=>{S.sp=v/10;ease()},v=>v+'/10');
+$('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
+$('#tb').onclick=function(){S.on=!S.on;this.classList.toggle('on',S.on);ease();$('#v3').textContent=S.on?$('#r3').value+'/10':'Off'};
+$('#td').onclick=function(){const d=!this.classList.contains('on');this.classList.toggle('on',d);R.dataset.theme=d?'dark':'light'};
+if(matchMedia('(prefers-color-scheme:dark)').matches)$('#td').classList.add('on');
+ease();renderRows();
+setTimeout(openApp,250);$('#app').classList.add('on');
+</script>
+<script>
+/* Native shell hook: lets the Android hardware back button unwind the UI
+   (close sheet -> leave thread -> close app) before the app itself exits. */
+window.__androidBack = function () {
+  try {
+    if (document.querySelector('.sheet.on')) { closeSheets(); return true; }
+    if (cur !== null && cur !== undefined) { backThread(); return true; }
+    if (document.querySelector('#app.on')) { closeApp(); return true; }
+  } catch (e) {}
+  return false;
+};
+</script>
+</body></html>
