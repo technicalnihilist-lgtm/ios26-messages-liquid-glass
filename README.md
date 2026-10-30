@@ -3,8 +3,9 @@
 A pixel-faithful recreation of the **iOS 26 Messages** app with Apple's *Liquid Glass*
 aesthetic — rebuilt as a real, installable **Android APK**.
 
-The whole UI is one self-contained HTML file running inside a hardened, fully offline
-WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
+The whole UI is one self-contained HTML file running inside a hardened WebView shell
+that talks to Android's real SMS stack — it can be your **default messaging app**.
+No internet permission, no trackers, no libraries, ~58 KB APK.
 
 <p align="center">
   <img src="screenshots/01-home.png" width="220" alt="Home screen">
@@ -29,12 +30,12 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 1.3 (versionCode 4) |
+| Version | 2.0 (versionCode 5) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~50 KB |
-| Permissions | **none** |
-| Internet | not required — 100% offline |
+| Size | ~58 KB |
+| Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, notifications |
+| Internet | **not requested** — the app cannot reach the network at all |
 
 ## What works
 
@@ -45,10 +46,16 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
   are adjustable at runtime.
 - **Starts empty** — no demo chats, no sample messages. The inbox opens on
   *No Conversations* and fills up with whatever you create.
-- **New chat** — tap the compose button, type a name, hit **Start chat**. The
-  conversation opens immediately, ready to type into.
-- **Every message gets a reply** — send anything and the other side answers by
-  default (typing indicator first, then a bubble), so a fresh chat never sits dead.
+- **New chat** — tap the compose button, type a phone number, hit **Start chat**.
+  The conversation opens immediately, ready to type into.
+- **Real SMS** — your actual conversations are read from the phone's SMS store,
+  messages are sent through `SmsManager`, and incoming texts are written back into
+  that store, so nothing is lost.
+- **Default messaging app** — a first-run sheet asks to become your default SMS app
+  (and Settings has the same switch). Tapping it requests the Android permissions,
+  then opens the system role dialog. The app ships every component Android requires
+  for that role: `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` receiver, a
+  respond-via-message service and `sms:`/`smsto:`/`mms:`/`mmsto:` intent filters.
 - **Messages list** — searchable, relative timestamps, 1:1 and group chats,
   tap-to-open with a parallax push transition.
 - **Long-press any bubble** — a glass context menu opens with **Copy** (routed to the
@@ -81,9 +88,9 @@ WebView shell. No internet permission, no trackers, no libraries, ~50 KB APK.
 |---|---|
 | ![](screenshots/07-settings.png) | ![](screenshots/09-context-menu.png) |
 
-| Long-press conversation → delete |
-|---|
-| ![](screenshots/10-row-menu.png) |
+| Long-press conversation → delete | Default messaging app prompt |
+|---|---|
+| ![](screenshots/10-row-menu.png) | ![](screenshots/12-default-app.png) |
 
 ## Project layout
 
@@ -116,6 +123,24 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 2.0 — real messaging
+
+- **Real SMS**: threads and messages come from the Android SMS provider; sending uses
+  `SmsManager` and also records the outgoing text.
+- **Default SMS app**: first-run prompt + a Settings switch. Requests permissions,
+  then the system role dialog. Includes every component the role requires.
+- **Incoming texts are safe**: the `SMS_DELIVER` receiver writes each message into the
+  system SMS store itself, so it survives even if the UI is closed.
+- **`sms:`/`smsto:` links** from contacts or the dialer open straight into a chat.
+- The old fake auto-reply is gone — the other side is a real person now.
+- Fixed a container-scroll bug that could shift the whole UI sideways after using
+  the keyboard.
+
+### Known limitation
+**MMS is not downloaded.** The app declares the required MMS receiver to qualify for
+the role, but full MMS (WAP push download) is out of scope here — when an MMS arrives
+you get a notification saying so, instead of the message vanishing silently.
 
 ## What's new in 1.3
 
@@ -155,9 +180,11 @@ publishing to the Play Store**.
   that has received Play Store updates (effectively all of them). On the rare device
   without it, the glass falls back to a solid tint; the app stays fully usable.
 - `window.__androidBack()` is the bridge the Java layer calls from `onBackPressed()`.
-- The only native method exposed to the page is `Android.copy(text)` (clipboard).
-  `addJavascriptInterface` is limited to that single method, and the app loads only
-  local assets — nothing can be reached from the network.
+- The JS bridge (`Android.*`) is deliberately narrow: clipboard copy, SMS read/send/
+  delete, permission and role requests. There is no network access and no file access
+  beyond the bundled assets.
+- Everything SMS-related goes through the standard provider (`content://sms`), so
+  other SMS apps can still read the same store if you switch back.
 - Bubbles, avatars and all colour are original CSS — no Apple assets are bundled.
   This is a design study, not an Apple product, and is not affiliated with Apple Inc.
 

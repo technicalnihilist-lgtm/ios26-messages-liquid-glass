@@ -21,11 +21,11 @@ echo "==> aapt2 compile";  "$BT/aapt2" compile --dir res -o "$OUT/res.zip"
 echo "==> aapt2 link";     "$BT/aapt2" link -o "$OUT/unsigned.apk" -I "$AJAR" \
     --manifest AndroidManifest.xml -A assets --java "$OUT/gen" \
     --min-sdk-version 24 --target-sdk-version 34 \
-    --version-code 4 --version-name 1.3 "$OUT/res.zip"
+    --version-code 5 --version-name 2.0 "$OUT/res.zip"
 echo "==> javac";          javac -nowarn -source 8 -target 8 \
     -bootclasspath "$AJAR" -classpath "$AJAR" -d "$OUT/classes" \
     "$OUT/gen/com/liquidglass/messages/R.java" \
-    src/com/liquidglass/messages/MainActivity.java
+    $(find src -name "*.java")
 echo "==> d8";             "$BT/d8" --release --min-api 24 --lib "$AJAR" \
     --output "$OUT/dex" $(find "$OUT/classes" -name "*.class")
 echo "==> package";        (cd "$OUT/dex" && zip -q -X "$OUT/unsigned.apk" classes.dex)
