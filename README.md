@@ -30,10 +30,10 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.1 (versionCode 6) |
+| Version | 2.2 (versionCode 7) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~58 KB |
+| Size | ~62 KB |
 | Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, notifications |
 | Internet | **not requested** — the app cannot reach the network at all |
 
@@ -44,6 +44,13 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 - **Spring / bounce motion** — a custom multi-keyframe spring curve drives app open,
   close, sheet presentation, message pop-in and press feedback. Strength and speed
   are adjustable at runtime.
+- **3D + depth** — the whole UI lives in a real perspective space: bubbles tilt toward
+  your finger with a specular highlight, cards and sheets carry layered depth shadows,
+  the wallpaper and bars parallax against each other, and messages recede as they
+  scroll away (smaller, dimmer, pushed back). Toggle and strength live in Settings.
+- **4D motion** — depth is driven by time and movement, not just taps: the wallpaper
+  blobs drift on a slow 22–28s cycle, and on a real phone the gyroscope tilts the
+  whole scene as you move the handset.
 - **Starts empty** — no demo chats, no sample messages. The inbox opens on
   *No Conversations* and fills up with whatever you create.
 - **New chat, two ways** — tap the compose button and type a phone number, or tap
@@ -95,6 +102,10 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 |---|---|---|
 | ![](screenshots/10-row-menu.png) | ![](screenshots/12-default-app.png) | ![](screenshots/13-contacts.png) |
 
+| 3D depth in a long thread — near bubbles lift, far ones recede |
+|---|
+| ![](screenshots/14-depth.png) |
+
 ## Project layout
 
 ```
@@ -126,6 +137,25 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 2.2 — 3D, depth and motion
+
+- **3D tilt**: press or drag across a bubble and it rotates toward the pointer
+  (`rotateX`/`rotateY` in a 1100px perspective) with a soft specular highlight that
+  follows the touch point.
+- **Depth effect**: every layer now has its own elevation — bubbles, bars, sheets and
+  the dock carry multi-layer shadows, and scrolling a conversation pushes distant
+  bubbles back in Z, shrinks them slightly and dims them, so the thread reads as a
+  corridor instead of a flat list.
+- **Parallax**: the wallpaper blobs, the navigation bar and the content move at
+  different rates as you move your finger — and via `deviceorientation`, as you tilt
+  the phone.
+- **4D (time)**: the background drifts on a slow ambient cycle, so the scene breathes
+  even when you are not touching it.
+- **Controls**: new *3D & depth* switch and *Depth* strength slider in Settings, both
+  saved with the rest of your preferences.
+- Tap targets stay intact — the depth engine only uses non-negative Z, so bubbles
+  never slip behind their parent plane (that used to break long-press).
 
 ## What's new in 2.1
 
@@ -201,6 +231,8 @@ you get a notification saying so, instead of the message vanishing silently.
   beyond the bundled assets.
 - Everything SMS-related goes through the standard provider (`content://sms`), so
   other SMS apps can still read the same store if you switch back.
+- The depth engine is transform-only and rAF-throttled: scroll depth recomputes once
+  per frame, parallax writes CSS custom properties, and nothing touches layout.
 - Bubbles, avatars and all colour are original CSS — no Apple assets are bundled.
   This is a design study, not an Apple product, and is not affiliated with Apple Inc.
 

@@ -82,6 +82,35 @@ input[type=range]{width:100%;accent-color:var(--out)}
 
 .perm{color:var(--tx2);font-size:15px;line-height:1.45;text-align:center;margin:0 0 18px}
 #defState{color:var(--tx2);font-size:15px;font-weight:400}
+
+/* ================= 3D / 4D depth engine ================= */
+.phone{perspective:1100px;transform-style:preserve-3d}
+.app{transform-style:preserve-3d}
+.blob{will-change:transform;animation:drift 22s ease-in-out infinite alternate}
+.blob:nth-of-type(2){animation-duration:28s;animation-delay:-6s}
+@keyframes drift{
+ 0%{transform:translate3d(0,0,0) scale(1)}
+ 50%{transform:translate3d(14px,-18px,0) scale(1.06)}
+ 100%{transform:translate3d(-12px,16px,0) scale(.96)}
+}
+.msgs{perspective:900px;transform-style:preserve-3d}
+.bub{
+ transform:translate3d(0,var(--by,0px),var(--bz,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(var(--bs,1));
+ transform-style:preserve-3d;backface-visibility:hidden;transform-origin:50% 50%;
+ transition:transform .16s ease-out,opacity .2s ease-out;
+ will-change:transform}
+.bub.me{box-shadow:0 10px 22px -10px rgba(10,132,255,.75),0 2px 6px rgba(0,0,0,.16)}
+.bub.th{box-shadow:0 10px 22px -12px rgba(0,0,0,.45),0 1px 3px rgba(0,0,0,.12)}
+.bub:after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+ background:radial-gradient(130px 90px at var(--mx,50%) var(--my,0%),rgba(255,255,255,.6),rgba(255,255,255,0) 70%);
+ opacity:var(--hl,0);transition:opacity .22s ease-out;mix-blend-mode:soft-light}
+.bar.glass{box-shadow:0 14px 30px -18px rgba(0,0,0,.55),inset 0 1px 1px rgba(255,255,255,.65),inset 0 -1px 2px rgba(255,255,255,.14)}
+.sheet{transform-style:preserve-3d;box-shadow:0 30px 70px -20px rgba(0,0,0,.55),0 10px 24px -12px rgba(0,0,0,.35),inset 0 1px 1px rgba(255,255,255,.6)}
+.row{transition:transform .18s ease-out}
+.row.lift{transform:translateZ(14px) scale(1.012)}
+.dock{box-shadow:0 26px 50px -22px rgba(0,0,0,.6),inset 0 1px 1px rgba(255,255,255,.7)}
+.icon{transition:transform .18s ease-out;transform-style:preserve-3d}
+.icon:active{transform:translateZ(22px) scale(1.06)}
 </style></head><body>
 <div class="phone" id="phone">
 <div class="blob" style="width:260px;height:260px;background:#ffd166;left:-60px;top:80px"></div>
@@ -109,6 +138,8 @@ input[type=range]{width:100%;accent-color:var(--out)}
   <div class="tg">Bounce effect<button class="sw on" id="tb" aria-label="Toggle bounce"></button></div>
   <div class="ctl"><label>Bounce strength <span id="v3"></span></label><input type="range" id="r3" min="1" max="10" value="6"></div>
   <div class="ctl"><label>Bounce speed <span id="v4"></span></label><input type="range" id="r4" min="1" max="10" value="5"></div>
+  <div class="tg">3D &amp; depth<button class="sw on" id="t3d" aria-label="Toggle 3D depth"></button></div>
+  <div class="ctl"><label>Depth <span id="v5"></span></label><input type="range" id="r5" min="0" max="10" value="5"></div>
   <div class="tg">Dark mode<button class="sw" id="td" aria-label="Toggle dark mode"></button></div>
   <div class="tg">Default SMS app<span id="defState">Not set</span></div>
  <button class="done glass" id="askDefault">Set as default</button>
@@ -175,7 +206,8 @@ function renderThread(){const t=T[cur];$('#ttl').innerHTML=`<div class="av" styl
  t.m.forEach((m,i)=>{h+=`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${m.x.replace(/</g,'&lt;')}</div>`;p=m.f});
  if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)h+='<div class="dl">Delivered</div>';
  if(t.typing)h+='<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>';
- $('#msgs').innerHTML=h;const s=$('#tscroll');s.scrollTop=s.scrollHeight}
+ $('#msgs').innerHTML=h;const s=$('#tscroll');s.scrollTop=s.scrollHeight;
+ if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
 function openThread(i){cur=i;T[i].u=false;loadMsgs(i);
  if(BR&&T[i].id)try{BR.markRead(T[i].id)}catch(e){}
  renderThread();slide($('#thread'),100);$('#list').style.transition='transform .5s';$('#list').style.transform='translateX(-25%)'}
@@ -224,18 +256,109 @@ function prefGet(k,d){try{if(BR&&BR.getPref){const v=BR.getPref(k,'');if(v!==nul
 function prefSet(k,v){try{if(BR&&BR.setPref){BR.setPref(k,String(v));return}}catch(e){}
  try{localStorage.setItem('lg_'+k,String(v))}catch(e){}}
 function saveCfg(){try{prefSet('ga',$('#r1').value);prefSet('blur',$('#r2').value);prefSet('k',$('#r3').value);
- prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);prefSet('theme',R.dataset.theme||'light')}catch(e){}}
+ prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);prefSet('theme',R.dataset.theme||'light');
+ prefSet('d3',D.on?1:0);prefSet('depth',$('#r5').value)}catch(e){}}
 function applyTheme(t){R.dataset.theme=t==='dark'?'dark':'light';const b=$('#td');if(b)b.classList.toggle('on',t==='dark')}
 $('#r1').value=prefGet('ga',28);$('#r2').value=prefGet('blur',22);
 $('#r3').value=prefGet('k',6);$('#r4').value=prefGet('sp',5);
 S.on=prefGet('bounce','1')==='1';
 applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
+// ================= 3D / 4D depth engine =================
+const D={on:true,strength:.5};
+const clamp1=v=>Math.max(-1,Math.min(1,v));
+let parX=0,parY=0,raf=null;
+function applyParallax(nx,ny){
+ parX=nx;parY=ny;
+ const blobs=document.querySelectorAll('.blob');
+ const amt=[26,40,18];
+ blobs.forEach((b,i)=>{
+   const d=amt[i%amt.length]*D.strength*2;
+   b.style.transform=`translate3d(${(-nx*d).toFixed(1)}px,${(-ny*d).toFixed(1)}px,0)`});
+ const bar=document.querySelector('#thread .bar'),listBar=document.querySelector('#list .bar');
+ const shift=(8*D.strength*2);
+ [bar,listBar].forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0)`});
+}
+function depthScroll(){
+ if(!D.on)return;
+ const sc=$('#tscroll');if(!sc)return;
+ const mid=sc.getBoundingClientRect().top+sc.clientHeight/2;
+ const h=sc.clientHeight||1;
+ document.querySelectorAll('#msgs .bub').forEach(b=>{
+   const r=b.getBoundingClientRect();
+   if(!r.height)return;
+   const k=Math.min(1,Math.abs((r.top+r.height/2-mid)/h)*1.6);
+   const s=D.strength*2;
+   // positive Z only: keeps every bubble in front of its parent plane so taps still land
+   b.style.setProperty('--bz',((1-k)*15*s).toFixed(1)+'px');
+   b.style.setProperty('--bs',(1-k*0.06*s).toFixed(3));
+   b.style.setProperty('--by',(-k*6*s).toFixed(1)+'px');
+   b.style.opacity=(1-k*0.3).toFixed(2);
+ });
+}
+function depthReset(){
+ document.querySelectorAll('#msgs .bub').forEach(b=>{
+   b.style.setProperty('--bz','0px');b.style.setProperty('--bs','1');b.style.setProperty('--by','0px');b.style.opacity='';
+   b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');b.style.setProperty('--hl','0')});
+ document.querySelectorAll('.blob').forEach(b=>{b.style.transform=''});
+ document.querySelectorAll('.bar').forEach(b=>{b.style.transform=''});
+}
+function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
+ const sw=$('#t3d');if(sw)sw.classList.toggle('on',D.on);
+ const r5=$('#r5');if(r5)r5.disabled=!D.on;saveCfg()}
+// pointer / touch parallax over the whole phone
+document.addEventListener('pointermove',e=>{
+ if(!D.on||e.pointerType==='touch')return;
+ const r=$('.phone').getBoundingClientRect();
+ applyParallax(clamp1(((e.clientX-r.left)/r.width-.5)*2),clamp1(((e.clientY-r.top)/r.height-.5)*2));
+},{passive:true});
+// device tilt = the 4th dimension (motion over time)
+window.addEventListener('deviceorientation',e=>{
+ if(!D.on||e.gamma==null||e.beta==null)return;
+ applyParallax(clamp1(e.gamma/32),clamp1((e.beta-45)/40));
+},{passive:true});
+// tilt a bubble toward the finger
+function bubbleTilt(b,e){
+ if(!D.on||!b)return;
+ const r=b.getBoundingClientRect();
+ const nx=clamp1(((e.clientX-r.left)/r.width-.5)*2),ny=clamp1(((e.clientY-r.top)/r.height-.5)*2);
+ const s=D.strength*2;
+ b.style.setProperty('--ry',(nx*11*s).toFixed(1)+'deg');
+ b.style.setProperty('--rx',(-ny*9*s).toFixed(1)+'deg');
+ b.style.setProperty('--bz',(14*s).toFixed(1)+'px');
+ b.style.setProperty('--mx',((nx+1)*50).toFixed(0)+'%');
+ b.style.setProperty('--my',((ny+1)*50).toFixed(0)+'%');
+ b.style.setProperty('--hl','0.85');
+}
+function bubbleFlat(b){
+ if(!b)return;
+ b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');
+ b.style.setProperty('--bz','0px');b.style.setProperty('--hl','0');
+}
+document.addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('.bub');if(b)bubbleTilt(b,e)},{passive:true});
+document.addEventListener('pointermove',e=>{const b=e.target.closest&&e.target.closest('.bub');if(b)bubbleTilt(b,e)},{passive:true});
+document.addEventListener('pointerup',()=>{document.querySelectorAll('#msgs .bub').forEach(bubbleFlat)},{passive:true});
+document.addEventListener('pointercancel',()=>{document.querySelectorAll('#msgs .bub').forEach(bubbleFlat)},{passive:true});
+// rows lift out of the plane on hover / press
+document.addEventListener('pointerover',e=>{const r=e.target.closest&&e.target.closest('.row');if(r&&D.on)r.classList.add('lift')});
+document.addEventListener('pointerout',e=>{const r=e.target.closest&&e.target.closest('.row');if(r)r.classList.remove('lift')});
+// scroll-linked depth
+document.addEventListener('scroll',e=>{
+ const t=e.target;
+ if(t&&t.id==='tscroll'&&!raf){raf=requestAnimationFrame(()=>{depthScroll();raf=null})}
+},true);
+// restore 3D settings (D is defined just above)
+D.on=prefGet('d3','1')==='1';D.strength=Math.max(0,Math.min(1,(+prefGet('depth',5))/10));
+$('#r5').value=prefGet('depth',5);
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
 bind('#r1','#v1',v=>R.style.setProperty('--ga',v/100),v=>v+'%');
 bind('#r2','#v2',v=>R.style.setProperty('--blur',v+'px'),v=>v+'px');
 bind('#r3','#v3',v=>{S.k=v/10;ease()},v=>v+'/10');
 bind('#r4','#v4',v=>{S.sp=v/10;ease()},v=>v+'/10');
 $('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';
+$('#t3d').classList.toggle('on',D.on);
+bind('#r5','#v5',v=>{D.strength=v/10;saveCfg();depthScroll()},v=>v+'/10');
+$('#t3d').onclick=function(){setDepth(!D.on)};
+$('#r5').disabled=!D.on;
 $('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
 $('#tb').onclick=function(){S.on=!S.on;this.classList.toggle('on',S.on);ease();$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';saveCfg()};
 $('#td').onclick=function(){const d=!this.classList.contains('on');applyTheme(d?'dark':'light');saveCfg()};
