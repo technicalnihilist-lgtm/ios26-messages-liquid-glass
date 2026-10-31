@@ -17,6 +17,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Telephony;
 import android.telephony.SmsManager;
 import android.view.View;
@@ -35,7 +37,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -56,6 +61,13 @@ public class MainActivity extends Activity {
     private WebView web;
     private String pendingAddress;
     private BroadcastReceiver smsChanged;
+    private final Handler poll = new Handler(Looper.getMainLooper());
+    private final Runnable pollTask = new Runnable() {
+        @Override public void run() {
+            js("window.__onSmsPoll && window.__onSmsPoll()");
+            poll.postDelayed(this, 6000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -147,10 +159,13 @@ public class MainActivity extends Activity {
         pushStatus();
         // the page may have been reloaded while we were away
         js("window.__onSmsChanged && window.__onSmsChanged()");
+        poll.removeCallbacks(pollTask);
+        poll.postDelayed(pollTask, 2500);
     }
 
     @Override
     protected void onPause() {
+        poll.removeCallbacks(pollTask);
         if (web != null) web.onPause();
         super.onPause();
     }
@@ -347,7 +362,6 @@ public class MainActivity extends Activity {
     // -------------------------------------------------------------- SMS store
 
     private String threadsJson() {
-        JSONArray out = new JSONArray();
         Map<Long, JSONObject> seen = new LinkedHashMap<>();
         Cursor c = null;
         try {
@@ -375,43 +389,123 @@ public class MainActivity extends Activity {
         } finally {
             if (c != null) c.close();
         }
-        for (JSONObject o : seen.values()) out.put(o);
+
+        // fold in everything we received ourselves - this is what makes new texts appear
+        try {
+            JSONArray local = LocalStore.all(this);
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject m = local.optJSONObject(i);
+                if (m == null) continue;
+                String addr = m.optString("addr");
+                long when = m.optLong("date");
+                JSONObject existing = null;
+                for (JSONObject o : seen.values()) {
+                    if (addr.equals(o.optString("addr"))) { existing = o; break; }
+                }
+                if (existing == null) {
+                    JSONObject o = new JSONObject();
+                    o.put("id", LocalStore.syntheticThreadId(addr));
+                    o.put("addr", addr);
+                    o.put("snippet", m.optString("body"));
+                    o.put("date", when);
+                    o.put("unread", 1);
+                    seen.put(o.optLong("id"), o);
+                } else if (when >= existing.optLong("date")) {
+                    existing.put("snippet", m.optString("body"));
+                    existing.put("date", when);
+                    existing.put("unread", 1);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        List<JSONObject> list = new ArrayList<>(seen.values());
+        Collections.sort(list, new Comparator<JSONObject>() {
+            @Override
+            public int compare(JSONObject a, JSONObject b) {
+                return Long.compare(b.optLong("date"), a.optLong("date"));
+            }
+        });
+        JSONArray out = new JSONArray();
+        for (JSONObject o : list) out.put(o);
         return out.toString();
     }
 
     private String messagesJson(long threadId, String addr) {
-        JSONArray out = new JSONArray();
-        String sel;
-        String[] args;
+        List<JSONObject> all = new ArrayList<>();
+
         if (threadId > 0) {
-            sel = Telephony.Sms.THREAD_ID + "=?";
-            args = new String[]{String.valueOf(threadId)};
-        } else if (addr != null && !addr.isEmpty()) {
-            sel = Telephony.Sms.ADDRESS + "=?";
-            args = new String[]{addr};
-        } else {
-            return out.toString();
+            Cursor c = null;
+            try {
+                c = getContentResolver().query(Telephony.Sms.CONTENT_URI,
+                        new String[]{Telephony.Sms._ID, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE},
+                        Telephony.Sms.THREAD_ID + "=?", new String[]{String.valueOf(threadId)},
+                        Telephony.Sms.DATE + " ASC");
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        JSONObject o = new JSONObject();
+                        o.put("id", c.getLong(0));
+                        o.put("body", c.getString(1) == null ? "" : c.getString(1));
+                        o.put("date", c.getLong(2));
+                        o.put("out", c.getInt(3) == Telephony.Sms.MESSAGE_TYPE_SENT ? 1 : 0);
+                        all.add(o);
+                    }
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) c.close();
+            }
         }
+
+        // our own copies (they also cover the "not the default app yet" case)
+        try {
+            JSONArray local = LocalStore.forAddress(this, addr);
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject m = local.optJSONObject(i);
+                if (m == null) continue;
+                String body = m.optString("body");
+                long when = m.optLong("date");
+                boolean dup = false;
+                for (JSONObject o : all) {
+                    if (body.equals(o.optString("body")) && Math.abs(when - o.optLong("date")) < 180000L) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (dup) continue;
+                JSONObject o = new JSONObject();
+                o.put("id", 0);
+                o.put("body", body);
+                o.put("date", when);
+                o.put("out", 0);
+                all.add(o);
+            }
+        } catch (Exception ignored) {}
+
+        Collections.sort(all, new Comparator<JSONObject>() {
+            @Override
+            public int compare(JSONObject a, JSONObject b) {
+                return Long.compare(a.optLong("date"), b.optLong("date"));
+            }
+        });
+
+        JSONArray out = new JSONArray();
+        for (JSONObject o : all) out.put(o);
+        return out.toString();
+    }
+
+    private String addrForThread(long threadId) {
+        if (threadId <= 0) return null;
         Cursor c = null;
         try {
             c = getContentResolver().query(Telephony.Sms.CONTENT_URI,
-                    new String[]{Telephony.Sms._ID, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE},
-                    sel, args, Telephony.Sms.DATE + " ASC");
-            if (c != null) {
-                while (c.moveToNext()) {
-                    JSONObject o = new JSONObject();
-                    o.put("id", c.getLong(0));
-                    o.put("body", c.getString(1) == null ? "" : c.getString(1));
-                    o.put("date", c.getLong(2));
-                    o.put("out", c.getInt(3) == Telephony.Sms.MESSAGE_TYPE_SENT ? 1 : 0);
-                    out.put(o);
-                }
-            }
+                    new String[]{Telephony.Sms.ADDRESS},
+                    Telephony.Sms.THREAD_ID + "=?", new String[]{String.valueOf(threadId)}, null);
+            if (c != null && c.moveToFirst()) return c.getString(0);
         } catch (Exception ignored) {
         } finally {
             if (c != null) c.close();
         }
-        return out.toString();
+        return null;
     }
 
     private void markThreadRead(long threadId) {
@@ -451,7 +545,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void deleteThread(long threadId) {
+    private void deleteThread(long threadId, String addr) {
+        if (threadId < 0) {
+            LocalStore.removeAddress(this, addr);
+            return;
+        }
         if (threadId <= 0) return;
         try {
             getContentResolver().delete(Telephony.Sms.CONTENT_URI,
@@ -524,7 +622,9 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void deleteThread(long threadId) {
-            MainActivity.this.deleteThread(threadId);
+            String addr = null;
+            try { addr = addrForThread(threadId); } catch (Exception ignored) {}
+            MainActivity.this.deleteThread(threadId, addr);
         }
 
         @JavascriptInterface

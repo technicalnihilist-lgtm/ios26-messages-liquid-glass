@@ -30,10 +30,10 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.2 (versionCode 7) |
+| Version | 2.3 (versionCode 8) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~62 KB |
+| Size | ~66 KB |
 | Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, notifications |
 | Internet | **not requested** — the app cannot reach the network at all |
 
@@ -51,6 +51,8 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 - **4D motion** — depth is driven by time and movement, not just taps: the wallpaper
   blobs drift on a slow 22–28s cycle, and on a real phone the gyroscope tilts the
   whole scene as you move the handset.
+- **Tune it** — Settings has *3D & depth* on/off plus **Depth**, **Parallax** and
+  **Tilt** sliders, all saved with your other preferences.
 - **Starts empty** — no demo chats, no sample messages. The inbox opens on
   *No Conversations* and fills up with whatever you create.
 - **New chat, two ways** — tap the compose button and type a phone number, or tap
@@ -137,6 +139,24 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 2.3 — incoming messages fixed
+
+- **New texts now actually arrive.** Four things were missing or fragile, all fixed:
+  - every received SMS is stored in the app's own backup store *before* anything else,
+    so a failed provider insert can no longer swallow it;
+  - a `SMS_RECEIVED` receiver was added for the case where the app is not the default
+    SMS app yet (Android only sends `SMS_DELIVER` to the default app);
+  - a notification is posted for every incoming text, so it is visible even when the
+    app is closed;
+  - the open app now polls the store every 6 seconds (and on resume), so a thread
+    updates on its own instead of waiting for a restart.
+- Also fixed: the `SEEN` column was written on Android 7/8 where it does not exist,
+  which could make the whole insert throw — the message is now saved either way.
+- **More depth, and control over it**: new **Parallax** and **Tilt** sliders next to
+  **Depth**; scroll depth is stronger (recession, tilt and dimming), tilt rotates
+  further toward your finger, and all three values persist.
+- Settings sheet compacted so the *Done* button no longer falls off the screen.
 
 ## What's new in 2.2 — 3D, depth and motion
 
@@ -231,6 +251,9 @@ you get a notification saying so, instead of the message vanishing silently.
   beyond the bundled assets.
 - Everything SMS-related goes through the standard provider (`content://sms`), so
   other SMS apps can still read the same store if you switch back.
+- Received messages are additionally mirrored into a small local backup store
+  (`SharedPreferences`) and merged, de-duplicated, back into the list — that is the
+  safety net that makes "a message arrived but never showed up" impossible.
 - The depth engine is transform-only and rAF-throttled: scroll depth recomputes once
   per frame, parallax writes CSS custom properties, and nothing touches layout.
 - Bubbles, avatars and all colour are original CSS — no Apple assets are bundled.

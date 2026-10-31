@@ -58,7 +58,11 @@ h1{font-size:34px;margin:6px 20px 8px;letter-spacing:-.5px}
 .sheet{position:absolute;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);border-radius:34px;padding:20px 20px 24px;z-index:21;display:none;max-height:82%;overflow-y:auto}
 .sheet.on{display:block}
 .sheet h2{margin:0 0 14px;font-size:20px;text-align:center}
-.ctl{margin:14px 0}.ctl label{display:flex;justify-content:space-between;font-size:15px;margin-bottom:6px}.ctl label span{color:var(--tx2)}
+.ctl{margin:9px 0}.ctl label{display:flex;justify-content:space-between;font-size:15px;margin-bottom:3px}.ctl label span{color:var(--tx2)}
+#sSet{padding:16px 18px 14px;max-height:90%}
+#sSet h2{margin:0 0 8px;font-size:19px}
+#sSet .tg{margin:9px 0}
+#sSet .done{position:sticky;bottom:0;margin-top:6px;background:rgba(var(--gtint),.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 input[type=range]{width:100%;accent-color:var(--out)}
 .tg{display:flex;justify-content:space-between;align-items:center;margin:14px 0;font-size:16px}
 .sw{width:51px;height:31px;border-radius:16px;background:rgba(120,120,128,.4);position:relative;transition:background .25s}
@@ -140,6 +144,8 @@ input[type=range]{width:100%;accent-color:var(--out)}
   <div class="ctl"><label>Bounce speed <span id="v4"></span></label><input type="range" id="r4" min="1" max="10" value="5"></div>
   <div class="tg">3D &amp; depth<button class="sw on" id="t3d" aria-label="Toggle 3D depth"></button></div>
   <div class="ctl"><label>Depth <span id="v5"></span></label><input type="range" id="r5" min="0" max="10" value="5"></div>
+  <div class="ctl"><label>Parallax <span id="v6"></span></label><input type="range" id="r6" min="0" max="10" value="5"></div>
+  <div class="ctl"><label>Tilt <span id="v7"></span></label><input type="range" id="r7" min="0" max="10" value="6"></div>
   <div class="tg">Dark mode<button class="sw" id="td" aria-label="Toggle dark mode"></button></div>
   <div class="tg">Default SMS app<span id="defState">Not set</span></div>
  <button class="done glass" id="askDefault">Set as default</button>
@@ -169,15 +175,18 @@ function fmtTime(ms){if(!ms)return'';const d=new Date(ms),n=new Date();
  return d.toLocaleDateString(undefined,{weekday:'short'})}
 function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
 function ini(s){const m=String(s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
+let lastSig='';
 function loadThreads(){if(!BR)return;try{
  const openId=(cur!==null&&T[cur])?T[cur].id:null,openAddr=(cur!==null&&T[cur])?T[cur].addr:null;
- const arr=JSON.parse(BR.loadThreads());T.length=0;
+ const arr=JSON.parse(BR.loadThreads());
+ const sig=arr.map(t=>t.id+'|'+t.date+'|'+t.snippet+'|'+t.unread).join('~');
+ T.length=0;
  arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),u:t.unread>0,m:[{x:t.snippet||''}]}));
  if(cur!==null){let k=-1;
   if(openId&&openId>0)k=T.findIndex(x=>x.id===openId);
   else if(openAddr)k=T.findIndex(x=>x.addr===openAddr);
   cur=k>=0?k:null}
- renderRows()}catch(e){}}
+ if(sig!==lastSig){lastSig=sig;renderRows()}}catch(e){}}
 function loadMsgs(i){const t=T[i];if(!BR||!t)return;try{
  const arr=JSON.parse(BR.loadMessages(t.id||0,t.addr));
  t.m=arr.map(m=>({id:m.id,f:m.out?1:0,x:m.body}))}catch(e){}}
@@ -257,25 +266,26 @@ function prefSet(k,v){try{if(BR&&BR.setPref){BR.setPref(k,String(v));return}}cat
  try{localStorage.setItem('lg_'+k,String(v))}catch(e){}}
 function saveCfg(){try{prefSet('ga',$('#r1').value);prefSet('blur',$('#r2').value);prefSet('k',$('#r3').value);
  prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);prefSet('theme',R.dataset.theme||'light');
- prefSet('d3',D.on?1:0);prefSet('depth',$('#r5').value)}catch(e){}}
+ prefSet('d3',D.on?1:0);prefSet('depth',$('#r5').value);
+ prefSet('par',$('#r6').value);prefSet('tilt',$('#r7').value)}catch(e){}}
 function applyTheme(t){R.dataset.theme=t==='dark'?'dark':'light';const b=$('#td');if(b)b.classList.toggle('on',t==='dark')}
 $('#r1').value=prefGet('ga',28);$('#r2').value=prefGet('blur',22);
 $('#r3').value=prefGet('k',6);$('#r4').value=prefGet('sp',5);
 S.on=prefGet('bounce','1')==='1';
 applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 // ================= 3D / 4D depth engine =================
-const D={on:true,strength:.5};
+const D={on:true,strength:.5,par:.5,tilt:.6};
 const clamp1=v=>Math.max(-1,Math.min(1,v));
 let parX=0,parY=0,raf=null;
 function applyParallax(nx,ny){
  parX=nx;parY=ny;
  const blobs=document.querySelectorAll('.blob');
- const amt=[26,40,18];
+ const amt=[30,48,22];
  blobs.forEach((b,i)=>{
-   const d=amt[i%amt.length]*D.strength*2;
+   const d=amt[i%amt.length]*D.par*2;
    b.style.transform=`translate3d(${(-nx*d).toFixed(1)}px,${(-ny*d).toFixed(1)}px,0)`});
  const bar=document.querySelector('#thread .bar'),listBar=document.querySelector('#list .bar');
- const shift=(8*D.strength*2);
+ const shift=(9*D.par*2);
  [bar,listBar].forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0)`});
 }
 function depthScroll(){
@@ -289,10 +299,11 @@ function depthScroll(){
    const k=Math.min(1,Math.abs((r.top+r.height/2-mid)/h)*1.6);
    const s=D.strength*2;
    // positive Z only: keeps every bubble in front of its parent plane so taps still land
-   b.style.setProperty('--bz',((1-k)*15*s).toFixed(1)+'px');
-   b.style.setProperty('--bs',(1-k*0.06*s).toFixed(3));
-   b.style.setProperty('--by',(-k*6*s).toFixed(1)+'px');
-   b.style.opacity=(1-k*0.3).toFixed(2);
+   b.style.setProperty('--bz',((1-k)*24*s).toFixed(1)+'px');
+   b.style.setProperty('--bs',(1-k*0.09*s).toFixed(3));
+   b.style.setProperty('--by',(-k*8*s).toFixed(1)+'px');
+   b.style.setProperty('--rx',(k*3.5*s).toFixed(1)+'deg');
+   b.style.opacity=(1-k*0.38).toFixed(2);
  });
 }
 function depthReset(){
@@ -321,10 +332,10 @@ function bubbleTilt(b,e){
  if(!D.on||!b)return;
  const r=b.getBoundingClientRect();
  const nx=clamp1(((e.clientX-r.left)/r.width-.5)*2),ny=clamp1(((e.clientY-r.top)/r.height-.5)*2);
- const s=D.strength*2;
- b.style.setProperty('--ry',(nx*11*s).toFixed(1)+'deg');
- b.style.setProperty('--rx',(-ny*9*s).toFixed(1)+'deg');
- b.style.setProperty('--bz',(14*s).toFixed(1)+'px');
+ const s=D.tilt*2;
+ b.style.setProperty('--ry',(nx*16*s).toFixed(1)+'deg');
+ b.style.setProperty('--rx',(-ny*13*s).toFixed(1)+'deg');
+ b.style.setProperty('--bz',(18*s).toFixed(1)+'px');
  b.style.setProperty('--mx',((nx+1)*50).toFixed(0)+'%');
  b.style.setProperty('--my',((ny+1)*50).toFixed(0)+'%');
  b.style.setProperty('--hl','0.85');
@@ -347,8 +358,9 @@ document.addEventListener('scroll',e=>{
  if(t&&t.id==='tscroll'&&!raf){raf=requestAnimationFrame(()=>{depthScroll();raf=null})}
 },true);
 // restore 3D settings (D is defined just above)
+$('#r5').value=prefGet('depth',5);$('#r6').value=prefGet('par',5);$('#r7').value=prefGet('tilt',6);
 D.on=prefGet('d3','1')==='1';D.strength=Math.max(0,Math.min(1,(+prefGet('depth',5))/10));
-$('#r5').value=prefGet('depth',5);
+D.par=Math.max(0,Math.min(1,(+prefGet('par',5))/10));D.tilt=Math.max(0,Math.min(1,(+prefGet('tilt',6))/10));
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
 bind('#r1','#v1',v=>R.style.setProperty('--ga',v/100),v=>v+'%');
 bind('#r2','#v2',v=>R.style.setProperty('--blur',v+'px'),v=>v+'px');
@@ -357,6 +369,8 @@ bind('#r4','#v4',v=>{S.sp=v/10;ease()},v=>v+'/10');
 $('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';
 $('#t3d').classList.toggle('on',D.on);
 bind('#r5','#v5',v=>{D.strength=v/10;saveCfg();depthScroll()},v=>v+'/10');
+bind('#r6','#v6',v=>{D.par=v/10;saveCfg();applyParallax(parX,parY)},v=>v+'/10');
+bind('#r7','#v7',v=>{D.tilt=v/10;saveCfg()},v=>v+'/10');
 $('#t3d').onclick=function(){setDepth(!D.on)};
 $('#r5').disabled=!D.on;
 $('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
@@ -485,6 +499,11 @@ $('#cq').oninput=function(){renderContacts(this.value)};
 $('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=r.dataset.num;if(!num)return;
  closeSheets();setTimeout(()=>{const k=T.findIndex(t=>t.addr===num);if(k>=0)openThread(k);else newChat(num)},300)};
 window.__onContactsReady=function(){const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
+window.__onSmsPoll=function(){if(!BR)return;try{
+ const before=(cur!==null&&T[cur])?T[cur].m.length:-1;
+ loadThreads();
+ if(cur!==null){loadMsgs(cur);if(T[cur].m.length!==before)renderThread()}
+}catch(e){}};
 window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#defState');if(el)el.textContent=on?'On':'Not set'};
 window.__onSmsChanged=function(){loadThreads();if(cur!==null){loadMsgs(cur);renderThread()}renderRows();if(window.__onSmsStatus)window.__onSmsStatus()};
 window.__composeTo=function(addr){if(!addr)return;const k=T.findIndex(t=>t.addr===addr);
