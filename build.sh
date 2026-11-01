@@ -21,7 +21,7 @@ echo "==> aapt2 compile";  "$BT/aapt2" compile --dir res -o "$OUT/res.zip"
 echo "==> aapt2 link";     "$BT/aapt2" link -o "$OUT/unsigned.apk" -I "$AJAR" \
     --manifest AndroidManifest.xml -A assets --java "$OUT/gen" \
     --min-sdk-version 24 --target-sdk-version 34 \
-    --version-code 8 --version-name 2.3 "$OUT/res.zip"
+    --version-code 9 --version-name 2.4 "$OUT/res.zip"
 echo "==> javac";          javac -nowarn -source 8 -target 8 \
     -bootclasspath "$AJAR" -classpath "$AJAR" -d "$OUT/classes" \
     "$OUT/gen/com/liquidglass/messages/R.java" \

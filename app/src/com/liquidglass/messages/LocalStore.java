@@ -18,6 +18,7 @@ final class LocalStore {
 
     private static final String PREFS = "liquidglass";
     private static final String KEY = "local_sms";
+    private static final String DELETED = "deleted_sms";
     private static final int MAX = 800;
 
     private LocalStore() {}
@@ -28,6 +29,7 @@ final class LocalStore {
 
     static synchronized void add(Context ctx, String addr, String body, long when) {
         if (addr == null || body == null || body.isEmpty()) return;
+        if (isDeleted(ctx, addr, body, when)) return;
         try {
             SharedPreferences p = prefs(ctx);
             JSONArray arr = new JSONArray(p.getString(KEY, "[]"));
@@ -51,6 +53,46 @@ final class LocalStore {
             while (arr.length() > MAX) arr.remove(0);
             p.edit().putString(KEY, arr.toString()).apply();
         } catch (Exception ignored) {}
+    }
+
+    /** Remember a deletion so the message can never be merged back in. */
+    static synchronized void tombstone(Context ctx, String addr, String body, long when) {
+        if (addr == null || body == null) return;
+        try {
+            SharedPreferences p = prefs(ctx);
+            JSONArray arr = new JSONArray(p.getString(DELETED, "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                if (addr.equals(o.optString("addr")) && body.equals(o.optString("body"))
+                        && Math.abs(when - o.optLong("date")) < 180000L) {
+                    return;
+                }
+            }
+            JSONObject o = new JSONObject();
+            o.put("addr", addr);
+            o.put("body", body);
+            o.put("date", when);
+            arr.put(o);
+            while (arr.length() > 3000) arr.remove(0);
+            p.edit().putString(DELETED, arr.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    static synchronized boolean isDeleted(Context ctx, String addr, String body, long when) {
+        if (addr == null || body == null) return false;
+        try {
+            JSONArray arr = new JSONArray(prefs(ctx).getString(DELETED, "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                if (addr.equals(o.optString("addr")) && body.equals(o.optString("body"))
+                        && Math.abs(when - o.optLong("date")) < 180000L) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     static synchronized JSONArray all(Context ctx) {

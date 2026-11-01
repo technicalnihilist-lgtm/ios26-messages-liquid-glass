@@ -30,7 +30,7 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.3 (versionCode 8) |
+| Version | 2.4 (versionCode 9) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~66 KB |
@@ -139,6 +139,20 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+## What's new in 2.4 — deletes stay deleted
+
+- **Deleting a message now sticks.** Previously a deleted text came straight back:
+  the app keeps its own backup copy of every received SMS, so after the system row was
+  removed the backup copy was merged back in on the next refresh.
+- Every delete now writes a **tombstone** (address + body + timestamp) before anything
+  else happens. The merge step skips anything tombstoned, and the receiver refuses to
+  re-store a tombstoned message — so a deleted text can never reappear, while new
+  messages from the same person still arrive normally.
+- Covers all three paths: deleting a single provider message, deleting a
+  backup-only message (no provider id), and deleting a whole conversation.
+- Deleting a conversation now also tombstones every message inside it, so the thread
+  does not come back after a refresh.
 
 ## What's new in 2.3 — incoming messages fixed
 
@@ -254,6 +268,8 @@ you get a notification saying so, instead of the message vanishing silently.
 - Received messages are additionally mirrored into a small local backup store
   (`SharedPreferences`) and merged, de-duplicated, back into the list — that is the
   safety net that makes "a message arrived but never showed up" impossible.
+- Deletions are recorded as tombstones in the same store and filtered out of every
+  merge, which is what keeps a deleted message deleted.
 - The depth engine is transform-only and rAF-throttled: scroll depth recomputes once
   per frame, parallax writes CSS custom properties, and nothing touches layout.
 - Bubbles, avatars and all colour are original CSS — no Apple assets are bundled.

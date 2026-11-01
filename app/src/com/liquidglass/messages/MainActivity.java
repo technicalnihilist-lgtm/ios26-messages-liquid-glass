@@ -398,6 +398,7 @@ public class MainActivity extends Activity {
                 if (m == null) continue;
                 String addr = m.optString("addr");
                 long when = m.optLong("date");
+                if (LocalStore.isDeleted(this, addr, m.optString("body"), when)) continue;
                 JSONObject existing = null;
                 for (JSONObject o : seen.values()) {
                     if (addr.equals(o.optString("addr"))) { existing = o; break; }
@@ -442,10 +443,13 @@ public class MainActivity extends Activity {
                         Telephony.Sms.DATE + " ASC");
                 if (c != null) {
                     while (c.moveToNext()) {
+                        String body = c.getString(1) == null ? "" : c.getString(1);
+                        long when = c.getLong(2);
+                        if (LocalStore.isDeleted(this, addr, body, when)) continue;
                         JSONObject o = new JSONObject();
                         o.put("id", c.getLong(0));
-                        o.put("body", c.getString(1) == null ? "" : c.getString(1));
-                        o.put("date", c.getLong(2));
+                        o.put("body", body);
+                        o.put("date", when);
                         o.put("out", c.getInt(3) == Telephony.Sms.MESSAGE_TYPE_SENT ? 1 : 0);
                         all.add(o);
                     }
@@ -464,6 +468,7 @@ public class MainActivity extends Activity {
                 if (m == null) continue;
                 String body = m.optString("body");
                 long when = m.optLong("date");
+                if (LocalStore.isDeleted(this, addr, body, when)) continue;
                 boolean dup = false;
                 for (JSONObject o : all) {
                     if (body.equals(o.optString("body")) && Math.abs(when - o.optLong("date")) < 180000L) {
@@ -547,10 +552,19 @@ public class MainActivity extends Activity {
 
     private void deleteThread(long threadId, String addr) {
         if (threadId < 0) {
+            try {
+                JSONArray local = LocalStore.forAddress(this, addr);
+                for (int i = 0; i < local.length(); i++) {
+                    JSONObject m = local.optJSONObject(i);
+                    if (m == null) continue;
+                    LocalStore.tombstone(this, addr, m.optString("body"), m.optLong("date"));
+                }
+            } catch (Exception ignored) {}
             LocalStore.removeAddress(this, addr);
             return;
         }
         if (threadId <= 0) return;
+        tombstoneThread(threadId, addr);
         try {
             getContentResolver().delete(Telephony.Sms.CONTENT_URI,
                     Telephony.Sms.THREAD_ID + "=?", new String[]{String.valueOf(threadId)});
@@ -559,9 +573,45 @@ public class MainActivity extends Activity {
 
     private void deleteMessage(long id) {
         if (id <= 0) return;
+        // remember what we are deleting, so the backup store cannot bring it back
+        try {
+            Cursor c = getContentResolver().query(
+                    Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, String.valueOf(id)),
+                    new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
+                    null, null, null);
+            if (c != null) {
+                if (c.moveToFirst()) {
+                    LocalStore.tombstone(this, c.getString(0), c.getString(1), c.getLong(2));
+                }
+                c.close();
+            }
+        } catch (Exception ignored) {}
         try {
             getContentResolver().delete(Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, String.valueOf(id)),
                     null, null);
+        } catch (Exception ignored) {}
+    }
+
+    /** Tombstone every message we know about in this thread before removing it. */
+    private void tombstoneThread(long threadId, String addr) {
+        try {
+            Cursor c = getContentResolver().query(Telephony.Sms.CONTENT_URI,
+                    new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
+                    Telephony.Sms.THREAD_ID + "=?", new String[]{String.valueOf(threadId)}, null);
+            if (c != null) {
+                while (c.moveToNext()) {
+                    LocalStore.tombstone(this, c.getString(0), c.getString(1), c.getLong(2));
+                }
+                c.close();
+            }
+        } catch (Exception ignored) {}
+        try {
+            JSONArray local = LocalStore.forAddress(this, addr);
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject m = local.optJSONObject(i);
+                if (m == null) continue;
+                LocalStore.tombstone(this, addr, m.optString("body"), m.optLong("date"));
+            }
         } catch (Exception ignored) {}
     }
 
@@ -621,15 +671,23 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void deleteThread(long threadId) {
-            String addr = null;
-            try { addr = addrForThread(threadId); } catch (Exception ignored) {}
-            MainActivity.this.deleteThread(threadId, addr);
+        public void deleteThread(long threadId, String addr) {
+            String resolved = addr;
+            if (resolved == null || resolved.isEmpty()) {
+                try { resolved = addrForThread(threadId); } catch (Exception ignored) {}
+            }
+            MainActivity.this.deleteThread(threadId, resolved);
         }
 
         @JavascriptInterface
         public void deleteMessage(long id) {
             MainActivity.this.deleteMessage(id);
+        }
+
+        /** For messages that only exist in our own store (no provider id). */
+        @JavascriptInterface
+        public void deleteLocalMessage(String addr, String body, long date) {
+            LocalStore.tombstone(MainActivity.this, addr, body, date);
         }
 
         @JavascriptInterface
