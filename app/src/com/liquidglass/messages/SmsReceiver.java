@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
 
@@ -43,10 +44,15 @@ public class SmsReceiver extends BroadcastReceiver {
         v.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX);
         v.put(Telephony.Sms.SEEN, 0);
 
+        Uri stored = null;
         try {
-            ctx.getContentResolver().insert(Telephony.Sms.Inbox.CONTENT_URI, v);
+            stored = ctx.getContentResolver().insert(Telephony.Sms.Inbox.CONTENT_URI, v);
         } catch (Exception ignored) {
         }
+        // the provider refused it: keep our own copy so the text is not lost
+        if (stored == null) LocalStore.add(ctx, address, body.toString(), when);
+
+        Notify.message(ctx, address, body.toString());
 
         Intent changed = new Intent(MainActivity.ACTION_SMS_CHANGED);
         changed.setPackage(ctx.getPackageName());

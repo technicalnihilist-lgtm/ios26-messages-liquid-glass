@@ -59,6 +59,7 @@ public class MainActivity extends Activity {
     private static final int REQ_CONTACTS = 2003;
 
     private WebView web;
+    private boolean pageLoaded;
     private String pendingAddress;
     private BroadcastReceiver smsChanged;
     private final Handler poll = new Handler(Looper.getMainLooper());
@@ -119,6 +120,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
+                pageLoaded = true;
                 flushPendingAddress();
                 pushStatus();
             }
@@ -149,7 +151,8 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleIntent(intent);
-        flushPendingAddress();
+        // the page may still be loading: onPageFinished will pick the address up
+        if (pageLoaded) flushPendingAddress();
     }
 
     @Override
@@ -159,6 +162,7 @@ public class MainActivity extends Activity {
         pushStatus();
         // the page may have been reloaded while we were away
         js("window.__onSmsChanged && window.__onSmsChanged()");
+        if (pageLoaded) flushPendingAddress();
         poll.removeCallbacks(pollTask);
         poll.postDelayed(pollTask, 2500);
     }
@@ -172,6 +176,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        pageLoaded = false;
         if (smsChanged != null) {
             try { unregisterReceiver(smsChanged); } catch (Exception ignored) {}
         }
@@ -205,6 +210,7 @@ public class MainActivity extends Activity {
     }
 
     private void flushPendingAddress() {
+        if (!pageLoaded) return;               // the intent would be lost in a page that is not up yet
         if (pendingAddress == null || pendingAddress.isEmpty()) return;
         String addr = pendingAddress;
         pendingAddress = null;
@@ -403,18 +409,19 @@ public class MainActivity extends Activity {
                 for (JSONObject o : seen.values()) {
                     if (addr.equals(o.optString("addr"))) { existing = o; break; }
                 }
+                boolean fresh = when > LocalStore.readAt(this, addr);
                 if (existing == null) {
                     JSONObject o = new JSONObject();
                     o.put("id", LocalStore.syntheticThreadId(addr));
                     o.put("addr", addr);
                     o.put("snippet", m.optString("body"));
                     o.put("date", when);
-                    o.put("unread", 1);
+                    o.put("unread", fresh ? 1 : 0);
                     seen.put(o.optLong("id"), o);
                 } else if (when >= existing.optLong("date")) {
                     existing.put("snippet", m.optString("body"));
                     existing.put("date", when);
-                    existing.put("unread", 1);
+                    if (fresh) existing.put("unread", 1);
                 }
             }
         } catch (Exception ignored) {}
@@ -513,7 +520,9 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private void markThreadRead(long threadId) {
+    private void markThreadRead(long threadId, String addr) {
+        if (threadId == 0 && (addr == null || addr.isEmpty())) return;
+        if (addr != null && !addr.isEmpty()) LocalStore.markRead(this, addr);
         if (threadId <= 0) return;
         try {
             ContentValues v = new ContentValues();
@@ -551,7 +560,9 @@ public class MainActivity extends Activity {
     }
 
     private void deleteThread(long threadId, String addr) {
-        if (threadId < 0) {
+        if (threadId <= 0) {
+            // a conversation that only exists in our own store (or has no provider id yet)
+            if (addr == null || addr.isEmpty()) return;
             try {
                 JSONArray local = LocalStore.forAddress(this, addr);
                 for (int i = 0; i < local.length(); i++) {
@@ -563,7 +574,6 @@ public class MainActivity extends Activity {
             LocalStore.removeAddress(this, addr);
             return;
         }
-        if (threadId <= 0) return;
         tombstoneThread(threadId, addr);
         try {
             getContentResolver().delete(Telephony.Sms.CONTENT_URI,
@@ -662,7 +672,17 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void markRead(long threadId) {
-            markThreadRead(threadId);
+            markThreadRead(threadId, threadId > 0 ? addrForThread(threadId) : null);
+        }
+
+        /** Synthetic (negative) thread ids carry no address, so the page passes it. */
+        @JavascriptInterface
+        public void markRead(long threadId, String addr) {
+            String resolved = addr;
+            if ((resolved == null || resolved.isEmpty()) && threadId > 0) {
+                try { resolved = addrForThread(threadId); } catch (Exception ignored) {}
+            }
+            markThreadRead(threadId, resolved);
         }
 
         @JavascriptInterface

@@ -175,8 +175,9 @@ function fmtTime(ms){if(!ms)return'';const d=new Date(ms),n=new Date();
  return d.toLocaleDateString(undefined,{weekday:'short'})}
 function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
 function ini(s){const m=String(s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 let lastSig='';
-function loadThreads(){if(!BR)return;try{
+function loadThreads(){if(!BR)return false;try{
  const openId=(cur!==null&&T[cur])?T[cur].id:null,openAddr=(cur!==null&&T[cur])?T[cur].addr:null;
  const arr=JSON.parse(BR.loadThreads());
  const sig=arr.map(t=>t.id+'|'+t.date+'|'+t.snippet+'|'+t.unread).join('~');
@@ -186,7 +187,7 @@ function loadThreads(){if(!BR)return;try{
   if(openId&&openId>0)k=T.findIndex(x=>x.id===openId);
   else if(openAddr)k=T.findIndex(x=>x.addr===openAddr);
   cur=k>=0?k:null}
- if(sig!==lastSig){lastSig=sig;renderRows()}}catch(e){}}
+ if(sig!==lastSig){lastSig=sig;renderRows();return true}return false}catch(e){return false}}
 function loadMsgs(i){const t=T[i];if(!BR||!t)return;try{
  const arr=JSON.parse(BR.loadMessages(t.id||0,t.addr));
  t.m=arr.map(m=>({id:m.id,f:m.out?1:0,x:m.body,d:m.date}))}catch(e){}}
@@ -209,16 +210,25 @@ function pop(el){if(!S.on)return;const k=S.k;el.animate([{transform:sc(.6)},{tra
 function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
 function renderRows(){const q=$('#q').value.toLowerCase();$('#rows').innerHTML=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
- return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${ini(t.n)}</div><div class="rt"><b>${t.n}<small>${t.t}</small></b><p>${l.x}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>'}
-function renderThread(){const t=T[cur];$('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${ini(t.n)}</div><span>${t.n}</span>`;
- let h='<div class="stamp"><b>Today</b> 9:38</div>',p=null;
- t.m.forEach((m,i)=>{h+=`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${m.x.replace(/</g,'&lt;')}</div>`;p=m.f});
+ return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>'}
+function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.date||Date.now(),d=new Date(ms),n=new Date();
+ const hm=((d.getHours()%12)||12)+':'+String(d.getMinutes()).padStart(2,'0');
+ let day;
+ if(d.toDateString()===n.toDateString())day='Today';
+ else{const y=new Date(n.getTime()-86400000);day=d.toDateString()===y.toDateString()?'Yesterday':d.toLocaleDateString(undefined,{weekday:'short'})}
+ return `<div class="stamp"><b>${esc(day)}</b> ${hm}</div>`}
+function renderThread(keepScroll){const t=T[cur];if(!t)return;
+ const s=$('#tscroll'),prevTop=s.scrollTop,wasBottom=(s.scrollHeight-s.scrollTop-s.clientHeight)<48;
+ $('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><span>${esc(t.n)}</span>`;
+ let h=stampFor(t),p=null;
+ t.m.forEach((m,i)=>{h+=`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${esc(m.x)}</div>`;p=m.f});
  if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)h+='<div class="dl">Delivered</div>';
  if(t.typing)h+='<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>';
- $('#msgs').innerHTML=h;const s=$('#tscroll');s.scrollTop=s.scrollHeight;
+ $('#msgs').innerHTML=h;
+ s.scrollTop=(keepScroll&&!wasBottom)?prevTop:s.scrollHeight;
  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
 function openThread(i){cur=i;T[i].u=false;loadMsgs(i);
- if(BR&&T[i].id)try{BR.markRead(T[i].id)}catch(e){}
+ if(BR&&(T[i].id||T[i].addr))try{BR.markRead(T[i].id||0,T[i].addr||'')}catch(e){}
  renderThread();slide($('#thread'),100);$('#list').style.transition='transform .5s';$('#list').style.transform='translateX(-25%)'}
 function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
 function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];
@@ -227,7 +237,7 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
   t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
   const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
   try{BR.sendSms(t.addr,v)}catch(e){}
-  const ci=cur;setTimeout(()=>{loadThreads();if(cur!==null){loadMsgs(cur);renderThread()}renderRows()},900);
+  setTimeout(()=>{loadThreads();if(cur!==null){loadMsgs(cur);renderThread(true)}renderRows()},900);
   return}
  t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
  const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
@@ -259,12 +269,14 @@ function newChat(addr){const i=T.length;
  T.push({id:0,addr:addr,n:addr,c:colorFor(addr),t:'Now',u:false,m:[]});
  renderRows();openThread(i);return i}
 
-$('#scrim').onclick=closeSheets;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>setTimeout(closeSheets,100));
+$('#scrim').onclick=()=>{if(X.g&&Date.now()-(X.t||0)<400)return;closeSheets()};document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>setTimeout(closeSheets,100));
 function prefGet(k,d){try{if(BR&&BR.getPref){const v=BR.getPref(k,'');if(v!==null&&v!=='')return v}}catch(e){}
  try{const v=localStorage.getItem('lg_'+k);if(v!==null)return v}catch(e){}return d}
 function prefSet(k,v){try{if(BR&&BR.setPref){BR.setPref(k,String(v));return}}catch(e){}
  try{localStorage.setItem('lg_'+k,String(v))}catch(e){}}
-function saveCfg(){try{prefSet('ga',$('#r1').value);prefSet('blur',$('#r2').value);prefSet('k',$('#r3').value);
+let saveT=null,noSave=true;
+function saveSoon(){if(noSave)return;clearTimeout(saveT);saveT=setTimeout(saveCfg,300)}
+function saveCfg(){if(noSave)return;try{prefSet('ga',$('#r1').value);prefSet('blur',$('#r2').value);prefSet('k',$('#r3').value);
  prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);prefSet('theme',R.dataset.theme||'light');
  prefSet('d3',D.on?1:0);prefSet('depth',$('#r5').value);
  prefSet('par',$('#r6').value);prefSet('tilt',$('#r7').value)}catch(e){}}
@@ -277,37 +289,47 @@ applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'da
 const D={on:true,strength:.5,par:.5,tilt:.6};
 const clamp1=v=>Math.max(-1,Math.min(1,v));
 let parX=0,parY=0,raf=null;
+let parBlobs=null,parBars=null,parPhone=null,parPhoneRect=null;
+function parCache(){if(parBlobs)return;parBlobs=[...document.querySelectorAll('.blob')];
+ parBars=[document.querySelector('#thread .bar'),document.querySelector('#list .bar')];
+ parPhone=document.querySelector('.phone')}
+addEventListener('resize',()=>{parPhoneRect=null},{passive:true});
 function applyParallax(nx,ny){
- parX=nx;parY=ny;
- const blobs=document.querySelectorAll('.blob');
+ parX=nx;parY=ny;parCache();
  const amt=[30,48,22];
- blobs.forEach((b,i)=>{
+ parBlobs.forEach((b,i)=>{
    const d=amt[i%amt.length]*D.par*2;
    b.style.transform=`translate3d(${(-nx*d).toFixed(1)}px,${(-ny*d).toFixed(1)}px,0)`});
- const bar=document.querySelector('#thread .bar'),listBar=document.querySelector('#list .bar');
  const shift=(9*D.par*2);
- [bar,listBar].forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0)`});
+ parBars.forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0`});
 }
 function depthScroll(){
  if(!D.on)return;
  const sc=$('#tscroll');if(!sc)return;
- const mid=sc.getBoundingClientRect().top+sc.clientHeight/2;
+ const bubs=document.querySelectorAll('#msgs .bub'),n=bubs.length;
+ if(!n)return;
+ const scR=sc.getBoundingClientRect();
+ const mid=scR.top+sc.clientHeight/2;
  const h=sc.clientHeight||1;
- document.querySelectorAll('#msgs .bub').forEach(b=>{
-   const r=b.getBoundingClientRect();
-   if(!r.height)return;
-   const k=Math.min(1,Math.abs((r.top+r.height/2-mid)/h)*1.6);
-   const s=D.strength*2;
+ const s=D.strength*2;
+ const ks=new Array(n);
+ for(let i=0;i<n;i++){const r=bubs[i].getBoundingClientRect();
+   ks[i]=r.height?Math.min(1,Math.abs((r.top+r.height/2-mid)/h)*1.6):-1}
+ for(let i=0;i<n;i++){const b=bubs[i],k=ks[i];if(k<0)continue;
+   const sig=k.toFixed(3)+'|'+s.toFixed(3);
+   if(b.__dk===sig)continue;
+   b.__dk=sig;
    // positive Z only: keeps every bubble in front of its parent plane so taps still land
    b.style.setProperty('--bz',((1-k)*24*s).toFixed(1)+'px');
    b.style.setProperty('--bs',(1-k*0.09*s).toFixed(3));
    b.style.setProperty('--by',(-k*8*s).toFixed(1)+'px');
    b.style.setProperty('--rx',(k*3.5*s).toFixed(1)+'deg');
    b.style.opacity=(1-k*0.38).toFixed(2);
- });
+ }
 }
 function depthReset(){
  document.querySelectorAll('#msgs .bub').forEach(b=>{
+   b.__dk=null;
    b.style.setProperty('--bz','0px');b.style.setProperty('--bs','1');b.style.setProperty('--by','0px');b.style.opacity='';
    b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');b.style.setProperty('--hl','0')});
  document.querySelectorAll('.blob').forEach(b=>{b.style.transform=''});
@@ -319,7 +341,9 @@ function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
 // pointer / touch parallax over the whole phone
 document.addEventListener('pointermove',e=>{
  if(!D.on||e.pointerType==='touch')return;
- const r=$('.phone').getBoundingClientRect();
+ parCache();
+ if(!parPhoneRect)parPhoneRect=parPhone.getBoundingClientRect();
+ const r=parPhoneRect;
  applyParallax(clamp1(((e.clientX-r.left)/r.width-.5)*2),clamp1(((e.clientY-r.top)/r.height-.5)*2));
 },{passive:true});
 // device tilt = the 4th dimension (motion over time)
@@ -362,10 +386,10 @@ $('#r5').value=prefGet('depth',5);$('#r6').value=prefGet('par',5);$('#r7').value
 D.on=prefGet('d3','1')==='1';D.strength=Math.max(0,Math.min(1,(+prefGet('depth',5))/10));
 D.par=Math.max(0,Math.min(1,(+prefGet('par',5))/10));D.tilt=Math.max(0,Math.min(1,(+prefGet('tilt',6))/10));
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
-bind('#r1','#v1',v=>R.style.setProperty('--ga',v/100),v=>v+'%');
-bind('#r2','#v2',v=>R.style.setProperty('--blur',v+'px'),v=>v+'px');
-bind('#r3','#v3',v=>{S.k=v/10;ease()},v=>v+'/10');
-bind('#r4','#v4',v=>{S.sp=v/10;ease()},v=>v+'/10');
+bind('#r1','#v1',v=>{R.style.setProperty('--ga',v/100);saveSoon()},v=>v+'%');
+bind('#r2','#v2',v=>{R.style.setProperty('--blur',v+'px');saveSoon()},v=>v+'px');
+bind('#r3','#v3',v=>{S.k=v/10;ease();saveSoon()},v=>v+'/10');
+bind('#r4','#v4',v=>{S.sp=v/10;ease();saveSoon()},v=>v+'/10');
 $('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';
 $('#t3d').classList.toggle('on',D.on);
 bind('#r5','#v5',v=>{D.strength=v/10;saveCfg();depthScroll()},v=>v+'/10');
@@ -375,6 +399,7 @@ $('#t3d').onclick=function(){setDepth(!D.on)};
 $('#r5').disabled=!D.on;
 $('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
 $('#tb').onclick=function(){S.on=!S.on;this.classList.toggle('on',S.on);ease();$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';saveCfg()};
+noSave=false;
 $('#td').onclick=function(){const d=!this.classList.contains('on');applyTheme(d?'dark':'light');saveCfg()};
 // ===== Long-press menu, delete, water sound =====
 let AC,MG;
@@ -407,7 +432,7 @@ function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected
  b.style.transition='none';b.style.transform=''; // undo press-scale so the measured box is the real one
  const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
  g.removeAttribute('data-i');g.style.cssText=`position:absolute;left:${r.left-A.left}px;top:${r.top-A.top}px;width:${r.width}px;margin:0;max-width:none;z-index:21`;
- $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='msg';$('#ctx .ci[data-a=copy]').style.display='';lpFired=Date.now();
+ $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='msg';X.t=Date.now();$('#ctx .ci[data-a=copy]').style.display='';lpFired=Date.now();
  g.animate([{transform:'scale(1)'},{transform:'scale(1.1)',offset:.5},{transform:'scale(1.05)'}],{duration:350,easing:'ease-out',fill:'forwards'});
  const m=$('#ctx'),W=190,H=104,me=b.classList.contains('me');
  let left=me?r.right-A.left-W:r.left-A.left;left=Math.max(12,Math.min(A.width-W-12,left));
@@ -430,7 +455,7 @@ function doDelete(){if(!X.g)return;const g=X.g,b=X.b,i=X.i,ci=cur;X.g=null;X.b=n
  a.onfinish=()=>{g.remove();collapse()}}
 $('#ctx').onclick=e=>{const it=e.target.closest('.ci');if(!it)return;unlockAudio();
  if(it.dataset.a==='del'){const fn=X.k==='row'?doRowDelete:doDelete;setTimeout(fn,120)}
- else{setTimeout(()=>{try{navigator.clipboard.writeText(T[cur].m[X.i].x)}catch(_){}closeCtx();$('#scrim').classList.remove('on')},120)}};
+ else{setTimeout(()=>{const th=T[cur],mm=th&&th.m[X.i];if(mm&&mm.x!=null){try{navigator.clipboard.writeText(mm.x)}catch(_){}}closeCtx();$('#scrim').classList.remove('on')},120)}};
 // long-press: pointer + touch + contextmenu so it works on phones and desktop
 let lp=null,lx=0,ly=0,lb=null;const M=$('#msgs');
 function lpStart(b,x,y){lx=x;ly=y;lb=b;clearTimeout(lp);lp=setTimeout(()=>{lp=null;openAny(lb)},380)}
@@ -457,7 +482,7 @@ function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null)return;close
  const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
  g.removeAttribute('data-i');g.classList.add('ghostrow');
  g.style.cssText=`position:absolute;left:${r.left-A.left+8}px;top:${r.top-A.top}px;width:${r.width-16}px;margin:0;z-index:21;background:var(--bg);border-radius:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)`;
- $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='row';lpFired=Date.now();
+ $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='row';X.t=Date.now();lpFired=Date.now();
  g.animate([{transform:'scale(1)'},{transform:'scale(1.05)',offset:.5},{transform:'scale(1.03)'}],{duration:350,easing:'ease-out',fill:'forwards'});
  const m=$('#ctx'),W=190,H=60;$('#ctx .ci[data-a=copy]').style.display='none';
  const left=Math.max(12,Math.min(A.width-W-12,r.left-A.left+20));
@@ -490,7 +515,7 @@ function renderContacts(q){if(!BR)return;let arr=[];
  if(!arr||!arr.length){$('#clist').innerHTML='<p class="perm">Contacts access is off. Allow it, or tap the compose button and type a number.</p>';return}
  const f=(q||'').toLowerCase().trim();
  const list=arr.filter(c=>!f||(c.name||'').toLowerCase().includes(f)||(c.number||'').includes(f)).slice(0,200);
- $('#clist').innerHTML=list.map(c=>{const nm=c.name||c.number||'';return `<div class="row cont" data-num="${String(c.number||'').replace(/"/g,'')}"><div class="av" style="background:${colorFor(nm)};width:40px;height:40px;font-size:17px">${ini(nm)}</div><div class="rt"><b>${nm}<small style="font-weight:400;font-size:13px">${c.number||''}</small></b></div></div>`}).join('')||'<p class="perm">No contact matches that.</p>'}
+ $('#clist').innerHTML=list.map(c=>{const nm=c.name||c.number||'';return `<div class="row cont" data-num="${esc(String(c.number||''))}"><div class="av" style="background:${colorFor(nm)};width:40px;height:40px;font-size:17px">${esc(ini(nm))}</div><div class="rt"><b>${esc(nm)}<small style="font-weight:400;font-size:13px">${esc(c.number||'')}</small></b></div></div>`}).join('')||'<p class="perm">No contact matches that.</p>'}
 function openContacts(){if(!BR)return;$('#cq').value='';renderContacts('');
  if(!BR.hasContactsPermission()){try{BR.requestContactsPermission()}catch(e){}}
  sheet('#sContacts');setTimeout(()=>renderContacts(''),400)}
@@ -500,12 +525,11 @@ $('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=
  closeSheets();setTimeout(()=>{const k=T.findIndex(t=>t.addr===num);if(k>=0)openThread(k);else newChat(num)},300)};
 window.__onContactsReady=function(){const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
 window.__onSmsPoll=function(){if(!BR)return;try{
- const before=(cur!==null&&T[cur])?T[cur].m.length:-1;
- loadThreads();
- if(cur!==null){loadMsgs(cur);if(T[cur].m.length!==before)renderThread()}
+ if(!loadThreads())return;
+ if(cur!==null){loadMsgs(cur);renderThread(true)}
 }catch(e){}};
 window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#defState');if(el)el.textContent=on?'On':'Not set'};
-window.__onSmsChanged=function(){loadThreads();if(cur!==null){loadMsgs(cur);renderThread()}renderRows();if(window.__onSmsStatus)window.__onSmsStatus()};
+window.__onSmsChanged=function(){loadThreads();if(cur!==null){loadMsgs(cur);renderThread(true)}renderRows();if(window.__onSmsStatus)window.__onSmsStatus()};
 window.__composeTo=function(addr){if(!addr)return;const k=T.findIndex(t=>t.addr===addr);
  if(k>=0)openThread(k);else{openApp();newChat(addr)}};
 if(BR){$('#newName').placeholder='To: phone number';loadThreads();

@@ -30,7 +30,7 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.4 (versionCode 9) |
+| Version | 2.5 (versionCode 10) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~66 KB |
@@ -139,6 +139,81 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
 publishing to the Play Store**.
+
+### Tests
+
+`tests/` runs the bundled HTML in Chromium with a mocked Android bridge — no phone
+needed.
+
+```bash
+npm install                       # playwright
+node tests/ui-tests.js            # 26 behavioural checks
+node tests/screenshots.js         # re-renders screenshots/
+```
+
+`ui-tests.js` covers boot, opening a thread, sending, delete + tombstones, the
+poll/receive path, HTML escaping, settings persistence, the default-SMS flow, the
+hardware-back chain and the 3D depth engine, and times a 300-message thread.
+
+## What's new in 2.5 — safety, correctness and speed
+
+**Fixed**
+
+- **Text from a real SMS could run code in the app.** Message bodies, conversation
+  names and contact names were written into the page as raw HTML, so a text
+  containing markup was parsed by the WebView — which has the SMS bridge attached.
+  Everything that comes out of the SMS store or the contact list is now escaped.
+- **The date above a conversation was hardcoded** to *"Today 9:38"* in every thread,
+  forever. It now shows the real date of the oldest message: *Today 9:38*,
+  *Yesterday 14:05* or *Tue 14:05*.
+- **Reading history got yanked away.** Every 6-second refresh (and every incoming
+  text) re-rendered the thread and jumped to the bottom, even if you had scrolled up.
+  The scroll position is now kept unless you were already at the bottom.
+- **Transparency, Blur, Bounce strength and Bounce speed were never saved** when you
+  moved them — they only got written when some *other* control was touched, so they
+  reverted on the next launch. They persist now.
+- **No notification for incoming texts while the app held the default-SMS role** —
+  only the fallback receiver notified. Both paths notify now, exactly once.
+- **A text could be lost if the system provider refused the insert** while the app was
+  the default app. It now falls back to the app's own store, like the other path.
+- **The unread dot never cleared** for messages kept in the app's backup store: the
+  merge step marked them unread again on every refresh. Read time is now recorded per
+  conversation.
+- **Deleting a conversation with no system thread id did nothing.** It now tombstones
+  and removes the local copies.
+- **`smsto:` intents that arrived while the page was still loading were dropped.**
+  The address is queued until the page is up.
+- **The long-press menu could be dismissed by the click that ends the press** on some
+  devices. The dimmed backdrop now ignores a click within 400 ms of opening the menu.
+- **Copy on a message that had just been deleted** threw an uncaught `TypeError`.
+- `HeadlessSmsSendService` used the deprecated `SmsManager.getDefault()` and could
+  crash on a null manager; it uses the system service on Android 12+.
+
+**Faster**
+
+- Scroll depth is computed with one read pass and one write pass (no forced layout per
+  bubble) and skips bubbles whose depth has not changed: **21 ms → 7 ms per frame**
+  on a 300-message thread in the test harness.
+- Parallax no longer queries the DOM and re-measures the phone on every pointer move.
+- The 6-second poll only reloads the open conversation when the conversation list
+  actually changed — one database query per poll instead of two.
+- Launching no longer writes all ten preferences to `SharedPreferences` four times
+  over; nothing is written until you touch a setting.
+- Tombstones are indexed once instead of re-parsing the stored JSON for every message
+  while a thread loads.
+
+**Left alone on purpose** (fixing them would visibly change the approved motion, so
+they are reported rather than patched):
+
+- The nav-bar parallax writes an invalid transform (`translate3d(x,y,0` with no closing
+  paren), so the bars never actually shift. Repairing it would slide both bars by up to
+  ~18 px as you tilt the phone.
+- The wallpaper blobs' parallax transform is overridden by the infinite `drift`
+  animation, so they drift but do not follow the pointer.
+
+**Note:** this APK is signed with the build machine's local dev key, which differs from
+the one used for 2.4 — uninstall the old build before installing this one.
+
 
 ## What's new in 2.4 — deletes stay deleted
 

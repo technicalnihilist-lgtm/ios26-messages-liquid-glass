@@ -3,6 +3,7 @@ package com.liquidglass.messages;
 import android.app.Service;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.IBinder;
 import android.telephony.SmsManager;
 
@@ -27,10 +28,14 @@ public class HeadlessSmsSendService extends Service {
                 String text = intent.getStringExtra(Intent.EXTRA_TEXT);
                 if (data != null && text != null) {
                     String addr = data.getSchemeSpecificPart();
-                    if (addr != null) {
-                        SmsManager sm = SmsManager.getDefault();
-                        ArrayList<String> parts = sm.divideMessage(text);
-                        sm.sendMultipartTextMessage(addr, null, parts, null, null);
+                    if (addr != null && !addr.isEmpty()) {
+                        SmsManager sm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                                ? getSystemService(SmsManager.class)
+                                : SmsManager.getDefault();
+                        if (sm != null) {
+                            ArrayList<String> parts = sm.divideMessage(text);
+                            sm.sendMultipartTextMessage(addr, null, parts, null, null);
+                        }
                     }
                 }
             }

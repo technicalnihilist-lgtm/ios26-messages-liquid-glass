@@ -16,8 +16,17 @@ final class Notify {
 
     private Notify() {}
 
+    // both receivers can see the same text; never notify twice for one SMS
+    private static String lastKey;
+    private static long lastAt;
+
     static void message(Context ctx, String from, String body) {
         try {
+            String key = (from == null ? "" : from) + '\u0000' + (body == null ? "" : body);
+            long now = System.currentTimeMillis();
+            if (key.equals(lastKey) && now - lastAt < 4000L) return;
+            lastKey = key;
+            lastAt = now;
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

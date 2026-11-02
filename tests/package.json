@@ -1,0 +1,12 @@
+{
+  "name": "liquid-glass-messages-tests",
+  "private": true,
+  "description": "Browser harness for the Liquid Glass Messages HTML shell",
+  "scripts": {
+    "test": "node ui-tests.js",
+    "shots": "node screenshots.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
+}
