@@ -35,7 +35,7 @@ h1{font-size:34px;margin:6px 20px 8px;letter-spacing:-.5px}
 .rt p{margin:2px 0 0;color:var(--tx2);font-size:15px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--out);position:absolute;left:6px;top:50%;margin-top:-5px}
 .msgs{display:flex;flex-direction:column;padding:0 14px}
-.bub{max-width:76%;padding:8px 13px;border-radius:19px;font-size:17px;line-height:1.28;margin-top:2px;word-wrap:break-word;user-select:text;position:relative}
+.bub{max-width:76%;padding:8px 13px;border-radius:19px;font-size:17px;line-height:1.28;margin-top:2px;word-wrap:break-word;overflow-wrap:break-word;white-space:pre-wrap;user-select:text;position:relative}
 .me{align-self:flex-end;background:var(--out);color:#fff}.th{align-self:flex-start;background:var(--in);color:var(--intx)}
 .gap{margin-top:9px}
 .stamp{align-self:center;font-size:12px;color:var(--tx2);margin:10px 0 4px}
@@ -99,7 +99,7 @@ input[type=range]{width:100%;accent-color:var(--out)}
 }
 .msgs{perspective:900px;transform-style:preserve-3d}
 .bub{
- transform:translate3d(0,var(--by,0px),var(--bz,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(var(--bs,1));
+ transform:translate3d(0,var(--by,0px),var(--bz,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(var(--bs,1)) scale(var(--ps,1));
  transform-style:preserve-3d;backface-visibility:hidden;transform-origin:50% 50%;
  transition:transform .16s ease-out,opacity .2s ease-out;
  will-change:transform}
@@ -176,6 +176,14 @@ function fmtTime(ms){if(!ms)return'';const d=new Date(ms),n=new Date();
 function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
 function ini(s){const m=String(s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+/* Run `fn` when a Web Animation settles. onfinish alone is not enough: an
+   animation that is cancelled (or that never gets its first frame) would leave
+   the sheet / menu / app stuck open and a delete that never reaches the store. */
+function done(anim,fn,grace){
+ let ran=false;const go=()=>{if(ran)return;ran=true;fn&&fn()};
+ if(anim){anim.onfinish=go;anim.oncancel=go}
+ let ms=0;try{const d=anim&&anim.effect&&anim.effect.getTiming().duration;if(typeof d==='number')ms=d}catch(e){}
+ setTimeout(go,ms+(grace||200));return anim}
 let lastSig='';
 function loadThreads(){if(!BR)return false;try{
  const openId=(cur!==null&&T[cur])?T[cur].id:null,openAddr=(cur!==null&&T[cur])?T[cur].addr:null;
@@ -205,8 +213,11 @@ function closeApp(){const a=$('#app');const k=S.k;
  if(!S.on){a.classList.remove('on');return}
  const d=(1.1-S.sp)*650*(0.7+k*.6);
  const an=a.animate([{transform:'scale(1)'},{transform:sc(1+.06*k),offset:.3},{transform:sc(.2),opacity:0}],{duration:d,easing:'ease-in'});
- an.onfinish=()=>a.classList.remove('on')}
-function pop(el){if(!S.on)return;const k=S.k;el.animate([{transform:sc(.6)},{transform:sc(1+.12*k),offset:.55},{transform:sc(1-.04*k),offset:.8},{transform:sc(1)}],{duration:(1.1-S.sp)*520,easing:'ease-out'})}
+ done(an,()=>a.classList.remove('on'))}
+function pop(el){if(!S.on)return;const k=S.k;
+ // keep the bubble's depth transform while it pops, otherwise it snaps flat mid-air
+ const base='translate3d(0,var(--by,0px),var(--bz,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(var(--bs,1)) ';
+ el.animate([{transform:base+sc(.6)},{transform:base+sc(1+.12*k),offset:.55},{transform:base+sc(1-.04*k),offset:.8},{transform:base+sc(1)}],{duration:(1.1-S.sp)*520,easing:'ease-out'})}
 function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
 function renderRows(){const q=$('#q').value.toLowerCase();$('#rows').innerHTML=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
@@ -218,6 +229,7 @@ function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.date||Date.now()
  else{const y=new Date(n.getTime()-86400000);day=d.toDateString()===y.toDateString()?'Yesterday':d.toLocaleDateString(undefined,{weekday:'short'})}
  return `<div class="stamp"><b>${esc(day)}</b> ${hm}</div>`}
 function renderThread(keepScroll){const t=T[cur];if(!t)return;
+ bubCache=null;geoReset();
  const s=$('#tscroll'),prevTop=s.scrollTop,wasBottom=(s.scrollHeight-s.scrollTop-s.clientHeight)<48;
  $('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><span>${esc(t.n)}</span>`;
  let h=stampFor(t),p=null;
@@ -229,13 +241,16 @@ function renderThread(keepScroll){const t=T[cur];if(!t)return;
  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
 function openThread(i){cur=i;T[i].u=false;loadMsgs(i);
  if(BR&&(T[i].id||T[i].addr))try{BR.markRead(T[i].id||0,T[i].addr||'')}catch(e){}
- renderThread();slide($('#thread'),100);$('#list').style.transition='transform .5s';$('#list').style.transform='translateX(-25%)'}
+ renderThread();slide($('#thread'),100);
+ // the list has to move on the same curve as the thread it is making room for
+ $('#list').style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;
+ $('#list').style.transform='translateX(-25%)'}
 function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
 function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];
  if(BR){
   if(!BR.hasSmsPermission()){BR.requestSmsPermission();return}
   t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
-  const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
+  const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
   try{BR.sendSms(t.addr,v)}catch(e){}
   setTimeout(()=>{loadThreads();if(cur!==null){loadMsgs(cur);renderThread(true)}renderRows()},900);
   return}
@@ -245,12 +260,19 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
  setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('.bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
 function sheet(id){$('#scrim').classList.add('on');const s=$(id);s.classList.add('on');spring(s,'translateY(110%)',['translateY(-'+(2+S.k*10)+'px)','translateY('+(S.k*4)+'px)','translateY(-'+S.k*2+'px)'],'translateY(0)',700)}
 function closeSheets(){document.querySelectorAll('.sheet.on').forEach(s=>{if(!S.on){s.classList.remove('on');return}
- const a=s.animate([{transform:'translateY(0)'},{transform:'translateY(-'+S.k*8+'px)',offset:.25},{transform:'translateY(110%)'}],{duration:(1.1-S.sp)*400,easing:'ease-in'});a.onfinish=()=>s.classList.remove('on')});$('#scrim').classList.remove('on');closeCtx()}
+ const a=s.animate([{transform:'translateY(0)'},{transform:'translateY(-'+S.k*8+'px)',offset:.25},{transform:'translateY(110%)'}],{duration:(1.1-S.sp)*400,easing:'ease-in'});done(a,()=>s.classList.remove('on'))});$('#scrim').classList.remove('on');closeCtx()}
 // press bounce on everything touchable
 let pr=null;
 const SEL='button,.ci,.row,.bub,.av,.search,.field,.sheet .ctl input,.cont,.dock,.sw';
-document.addEventListener('pointerdown',e=>{const el=e.target.closest(SEL);if(!el||el.type==='range'||!S.on)return;pr=el;el.style.transition='transform .14s ease-out';el.style.transform=`scale(${getComputedStyle(R).getPropertyValue('--pd')})`});
-function rel(){if(!pr)return;const el=pr;pr=null;el.style.transition=`transform var(--dur) var(--ease)`;el.style.transform='';setTimeout(()=>{el.style.transition=''},900)}
+document.addEventListener('pointerdown',e=>{const el=e.target.closest(SEL);if(!el||el.type==='range'||!S.on)return;pr=el;
+ const pd=getComputedStyle(R).getPropertyValue('--pd').trim();
+ // a bubble already carries the depth transform, so press it through a var: an inline
+ // transform would throw the 3D pose away for as long as the finger is down
+ if(el.classList.contains('bub')){el.style.setProperty('--ps',pd||'.93');return}
+ el.style.transition='transform .14s ease-out';el.style.transform=`scale(${pd})`});
+function rel(){if(!pr)return;const el=pr;pr=null;
+ if(el.classList.contains('bub')){el.style.setProperty('--ps','1');return}
+ el.style.transition=`transform var(--dur) var(--ease)`;el.style.transform='';setTimeout(()=>{el.style.transition=''},900)}
 ['pointerup','pointercancel','pointerleave'].forEach(n=>document.addEventListener(n,rel));
 // wiring
 $('#openApp').onclick=()=>setTimeout(openApp,60);
@@ -288,12 +310,17 @@ applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'da
 // ================= 3D / 4D depth engine =================
 const D={on:true,strength:.5,par:.5,tilt:.6};
 const clamp1=v=>Math.max(-1,Math.min(1,v));
-let parX=0,parY=0,raf=null;
+let parX=0,parY=0,raf=null,parRaf=0,parQ=null;
 let parBlobs=null,parBars=null,parPhone=null,parPhoneRect=null;
 function parCache(){if(parBlobs)return;parBlobs=[...document.querySelectorAll('.blob')];
  parBars=[document.querySelector('#thread .bar'),document.querySelector('#list .bar')];
  parPhone=document.querySelector('.phone')}
-addEventListener('resize',()=>{parPhoneRect=null},{passive:true});
+addEventListener('resize',()=>{parPhoneRect=null;geoReset()},{passive:true});
+// NOTE: the bar/blob parallax below is written exactly as it was approved. The bar
+// string is missing its closing paren and the blob transform is overridden by the
+// infinite drift animation, so neither actually moves - repairing either one slides
+// the bars and the wallpaper as you tilt the phone, which is a motion change the
+// design owner has to sign off on. Reported, not patched.
 function applyParallax(nx,ny){
  parX=nx;parY=ny;parCache();
  const amt=[30,48,22];
@@ -303,18 +330,35 @@ function applyParallax(nx,ny){
  const shift=(9*D.par*2);
  parBars.forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0`});
 }
+let bubCache=null;
+function bubList(){if(!bubCache||!bubCache.length||!bubCache[0].isConnected)bubCache=[...document.querySelectorAll('#msgs .bub')];return bubCache}
+/* Bubbles are laid out once per render: this function transforms the very
+   elements it measures, so reading a rect per bubble per frame measured last
+   frame's pose and forced a full relayout on every scroll tick. */
+let geo=null,geoN=-1;
+function geoReset(){geo=null;geoN=-1}
+function depthGeo(bubs,sc){
+ if(geo&&geoN===bubs.length)return geo;
+ const msgs=$('#msgs');
+ const base=(msgs&&msgs.offsetParent===sc)?msgs.offsetTop:0;
+ geo=bubs.map(b=>{const op=b.offsetParent;if(op===null||!b.offsetHeight)return null;
+   if(op===sc)return{t:b.offsetTop,h:b.offsetHeight};
+   if(op===msgs)return{t:base+b.offsetTop,h:b.offsetHeight};
+   const r=b.getBoundingClientRect(),sr=sc.getBoundingClientRect();
+   return{t:r.top-sr.top+sc.scrollTop,h:r.height}});
+ geoN=bubs.length;
+ return geo}
 function depthScroll(){
  if(!D.on)return;
  const sc=$('#tscroll');if(!sc)return;
- const bubs=document.querySelectorAll('#msgs .bub'),n=bubs.length;
+ const bubs=bubList(),n=bubs.length;
  if(!n)return;
- const scR=sc.getBoundingClientRect();
- const mid=scR.top+sc.clientHeight/2;
  const h=sc.clientHeight||1;
+ const mid=h/2,top=sc.scrollTop;   // viewport centre, in scroll-content coordinates
  const s=D.strength*2;
- const ks=new Array(n);
- for(let i=0;i<n;i++){const r=bubs[i].getBoundingClientRect();
-   ks[i]=r.height?Math.min(1,Math.abs((r.top+r.height/2-mid)/h)*1.6):-1}
+ const ks=new Array(n),g=depthGeo(bubs,sc);
+ for(let i=0;i<n;i++){const q=g[i];
+   ks[i]=q?Math.min(1,Math.abs(q.t+q.h/2-top-mid)/h*1.6):-1}
  for(let i=0;i<n;i++){const b=bubs[i],k=ks[i];if(k<0)continue;
    const sig=k.toFixed(3)+'|'+s.toFixed(3);
    if(b.__dk===sig)continue;
@@ -328,11 +372,11 @@ function depthScroll(){
  }
 }
 function depthReset(){
- document.querySelectorAll('#msgs .bub').forEach(b=>{
+ bubList().forEach(b=>{
    b.__dk=null;
    b.style.setProperty('--bz','0px');b.style.setProperty('--bs','1');b.style.setProperty('--by','0px');b.style.opacity='';
-   b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');b.style.setProperty('--hl','0')});
- document.querySelectorAll('.blob').forEach(b=>{b.style.transform=''});
+   b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');b.style.setProperty('--hl','0');b.style.setProperty('--ps','1')});
+ document.querySelectorAll('.blob').forEach(b=>{b.style.transform='';b.style.translate=''});
  document.querySelectorAll('.bar').forEach(b=>{b.style.transform=''});
 }
 function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
@@ -341,10 +385,12 @@ function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
 // pointer / touch parallax over the whole phone
 document.addEventListener('pointermove',e=>{
  if(!D.on||e.pointerType==='touch')return;
- parCache();
- if(!parPhoneRect)parPhoneRect=parPhone.getBoundingClientRect();
- const r=parPhoneRect;
- applyParallax(clamp1(((e.clientX-r.left)/r.width-.5)*2),clamp1(((e.clientY-r.top)/r.height-.5)*2));
+ parQ=[e.clientX,e.clientY];if(parRaf)return;
+ parRaf=requestAnimationFrame(()=>{parRaf=0;const q=parQ;parQ=null;if(!q)return;
+  parCache();
+  if(!parPhoneRect)parPhoneRect=parPhone.getBoundingClientRect();
+  const r=parPhoneRect;
+  applyParallax(clamp1(((q[0]-r.left)/r.width-.5)*2),clamp1(((q[1]-r.top)/r.height-.5)*2))});
 },{passive:true});
 // device tilt = the 4th dimension (motion over time)
 window.addEventListener('deviceorientation',e=>{
@@ -369,10 +415,14 @@ function bubbleFlat(b){
  b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');
  b.style.setProperty('--bz','0px');b.style.setProperty('--hl','0');
 }
-document.addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('.bub');if(b)bubbleTilt(b,e)},{passive:true});
-document.addEventListener('pointermove',e=>{const b=e.target.closest&&e.target.closest('.bub');if(b)bubbleTilt(b,e)},{passive:true});
-document.addEventListener('pointerup',()=>{document.querySelectorAll('#msgs .bub').forEach(bubbleFlat)},{passive:true});
-document.addEventListener('pointercancel',()=>{document.querySelectorAll('#msgs .bub').forEach(bubbleFlat)},{passive:true});
+let tiltB=null,tiltQ=null,tiltRaf=0;
+function untilt(){const b=tiltB;tiltB=null;if(b)bubbleFlat(b);requestAnimationFrame(depthScroll)}
+document.addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('.bub');if(b){tiltB=b;bubbleTilt(b,e)}},{passive:true});
+document.addEventListener('pointermove',e=>{const b=e.target.closest&&e.target.closest('.bub');if(!b)return;
+ tiltB=b;tiltQ=[b,e.clientX,e.clientY];if(tiltRaf)return;
+ tiltRaf=requestAnimationFrame(()=>{tiltRaf=0;const q=tiltQ;tiltQ=null;if(q)bubbleTilt(q[0],{clientX:q[1],clientY:q[2]})})},{passive:true});
+document.addEventListener('pointerup',untilt,{passive:true});
+document.addEventListener('pointercancel',untilt,{passive:true});
 // rows lift out of the plane on hover / press
 document.addEventListener('pointerover',e=>{const r=e.target.closest&&e.target.closest('.row');if(r&&D.on)r.classList.add('lift')});
 document.addEventListener('pointerout',e=>{const r=e.target.closest&&e.target.closest('.row');if(r)r.classList.remove('lift')});
@@ -407,7 +457,12 @@ function actx(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContex
  if(AC&&AC.state!=='running'){try{AC.resume()}catch(e){}}return AC}
 function unlockAudio(){if(AC&&AC.state==='running')return;const c=actx();if(!c)return;try{const s=c.createBufferSource();s.buffer=c.createBuffer(1,1,22050);s.connect(c.destination);s.start(0)}catch(e){}}
 ['touchend','pointerup','click','keydown'].forEach(n=>document.addEventListener(n,unlockAudio,{passive:true}));
-function noiseBuf(c,sec){const n=Math.floor(c.sampleRate*sec),b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;return b}
+let NOISE=null; // one noise buffer per audio context: splash/soft-splash reuse it instead of re-filling 1-2s of random samples
+function noiseBuf(c,sec){const need=Math.max(.1,sec||1);
+ if(!NOISE||NOISE.sampleRate!==c.sampleRate||NOISE.duration<need){
+  const n=Math.max(1,Math.floor(c.sampleRate*Math.max(need,2))),b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=Math.random()*2-1;NOISE=b}
+ return NOISE}
 function bubble(c,t,f,dur,vol){const o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(f,t);o.frequency.exponentialRampToValueAtTime(f*2.2,t+dur);
  g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(vol,t+.006);g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(g);g.connect(MG);o.start(t);o.stop(t+dur+.03)}
 function splash(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02;
@@ -426,12 +481,17 @@ function splash(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02;
  for(let k=0;k<14;k++){const bt=t+.04+Math.pow(Math.random(),.8)*1.05;bubble(c,bt,500+Math.random()*1300,.05+Math.random()*.07,.3*(1-(bt-t)/1.4))}}
 const X={b:null,g:null,i:-1};
 function hideMenu(){const m=$('#ctx');if(!m.classList.contains('on'))return;if(!S.on){m.classList.remove('on');return}
- const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});a.onfinish=()=>m.classList.remove('on')}
+ const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});done(a,()=>m.classList.remove('on'))}
 function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}if(X.b){X.b.style.visibility='';X.b=null}}
 function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected)return;closeCtx();
- b.style.transition='none';b.style.transform=''; // undo press-scale so the measured box is the real one
+ const th=T[cur],mm=th&&th.m[i]?th.m[i]:null;if(!th||!mm)return;
+ // snapshot the thread + message now: a poll can reorder the list while the menu is open
+ X.th={id:th.id,addr:th.addr};X.msg={id:mm.id,x:mm.x,d:mm.d};
+ b.style.transition='none';b.style.transform='';b.style.setProperty('--ps','1'); // undo press-scale so the measured box is the real one
  const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
- g.removeAttribute('data-i');g.style.cssText=`position:absolute;left:${r.left-A.left}px;top:${r.top-A.top}px;width:${r.width}px;margin:0;max-width:none;z-index:21`;
+ // keep the bubble's depth pose on the floating copy (cssText would wipe it)
+ const pose=['--bz','--by','--bs','--rx','--ry'].map(v=>v+':'+(b.style.getPropertyValue(v)||{['--bz']:'0px',['--by']:'0px',['--bs']:'1',['--rx']:'0deg',['--ry']:'0deg'}[v])+';').join('');
+ g.removeAttribute('data-i');g.style.cssText=`position:absolute;left:${r.left-A.left}px;top:${r.top-A.top}px;width:${r.width}px;margin:0;max-width:none;z-index:21;${pose}`;
  $('#app').appendChild(g);b.style.visibility='hidden';X.b=b;X.g=g;X.i=i;X.k='msg';X.t=Date.now();$('#ctx .ci[data-a=copy]').style.display='';lpFired=Date.now();
  g.animate([{transform:'scale(1)'},{transform:'scale(1.1)',offset:.5},{transform:'scale(1.05)'}],{duration:350,easing:'ease-out',fill:'forwards'});
  const m=$('#ctx'),W=190,H=104,me=b.classList.contains('me');
@@ -445,17 +505,23 @@ function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected
 function drops(x,y){const A=$('#app');for(let n=0;n<12;n++){const d=document.createElement('i'),s=5+Math.random()*7;
  d.style.cssText=`position:absolute;left:${x}px;top:${y}px;width:${s}px;height:${s}px;border-radius:50%;background:rgba(90,190,255,.85);box-shadow:inset -1px -1px 2px rgba(255,255,255,.7);z-index:23;pointer-events:none`;A.appendChild(d);
  const ang=Math.random()*Math.PI*2,dist=30+Math.random()*60,dx=Math.cos(ang)*dist,dy=Math.sin(ang)*dist;
- d.animate([{transform:'translate(0,0) scale(1)',opacity:1},{transform:`translate(${dx}px,${dy-25}px) scale(1)`,opacity:1,offset:.5},{transform:`translate(${dx*1.2}px,${dy+60}px) scale(.4)`,opacity:0}],{duration:650+Math.random()*250,easing:'cubic-bezier(.2,.7,.4,1)'}).onfinish=()=>d.remove()}}
-function doDelete(){if(!X.g)return;const g=X.g,b=X.b,i=X.i,ci=cur;X.g=null;X.b=null;hideMenu();$('#scrim').classList.remove('on');
+ done(d.animate([{transform:'translate(0,0) scale(1)',opacity:1},{transform:`translate(${dx}px,${dy-25}px) scale(1)`,opacity:1,offset:.5},{transform:`translate(${dx*1.2}px,${dy+60}px) scale(.4)`,opacity:0}],{duration:650+Math.random()*250,easing:'cubic-bezier(.2,.7,.4,1)'}),()=>d.remove(),300)}}
+function doDelete(){if(!X.g)return;const g=X.g,b=X.b,snap=X.msg,th=X.th,ci=cur;X.g=null;X.b=null;X.msg=null;X.th=null;hideMenu();$('#scrim').classList.remove('on');
  splash();const r=g.getBoundingClientRect(),A=$('#app').getBoundingClientRect();drops(r.left-A.left+r.width/2,r.top-A.top+r.height/2);
- const finish=()=>{const sc0=$('#tscroll').scrollTop;const mm=T[ci]&&T[ci].m[i]?T[ci].m[i]:null;if(BR&&mm){try{if(mm.id)BR.deleteMessage(mm.id);else if(BR.deleteLocalMessage)BR.deleteLocalMessage(T[ci].addr,mm.x,mm.d||0)}catch(e){}};if(T[ci]&&T[ci].m[i])T[ci].m.splice(i,1);if(cur===ci){renderThread();$('#tscroll').scrollTop=sc0}renderRows()};
+ const finish=()=>{const sc0=$('#tscroll').scrollTop;
+  if(BR&&snap){try{if(snap.id)BR.deleteMessage(snap.id);else if(BR.deleteLocalMessage)BR.deleteLocalMessage((th&&th.addr)||'',snap.x,snap.d||0)}catch(e){}}
+  const t=ci!==null?T[ci]:null;
+  if(t&&snap){let k=-1;for(let j=0;j<t.m.length;j++){const m=t.m[j];
+   if(snap.id?(m.id===snap.id):(m.x===snap.x&&Math.abs((m.d||0)-(snap.d||0))<2000)){k=j;break}}
+   if(k>=0)t.m.splice(k,1)}
+  if(cur===ci){renderThread();$('#tscroll').scrollTop=sc0}renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
-  const cs=getComputedStyle(b);b.animate([{height:b.offsetHeight+'px',marginTop:cs.marginTop,paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',marginTop:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:220,easing:'ease-out',fill:'forwards'}).onfinish=finish};
+  const cs=getComputedStyle(b);done(b.animate([{height:b.offsetHeight+'px',marginTop:cs.marginTop,paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',marginTop:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:220,easing:'ease-out',fill:'forwards'}),finish)};
  const a=g.animate([{transform:'scale(1.05)',opacity:1},{transform:'scale(1.15)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-6deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(8deg)',opacity:0}],{duration:S.on?520:200,easing:'ease-in',fill:'forwards'});
- a.onfinish=()=>{g.remove();collapse()}}
+ done(a,()=>{g.remove();collapse()})}
 $('#ctx').onclick=e=>{const it=e.target.closest('.ci');if(!it)return;unlockAudio();
  if(it.dataset.a==='del'){const fn=X.k==='row'?doRowDelete:doDelete;setTimeout(fn,120)}
- else{setTimeout(()=>{const th=T[cur],mm=th&&th.m[X.i];if(mm&&mm.x!=null){try{navigator.clipboard.writeText(mm.x)}catch(_){}}closeCtx();$('#scrim').classList.remove('on')},120)}};
+ else{setTimeout(()=>{const mm=X.msg;if(mm&&mm.x!=null){try{const p=navigator.clipboard.writeText(mm.x);if(p&&p.catch)p.catch(()=>{})}catch(_){}}closeCtx();$('#scrim').classList.remove('on')},120)}};
 // long-press: pointer + touch + contextmenu so it works on phones and desktop
 let lp=null,lx=0,ly=0,lb=null;const M=$('#msgs');
 function lpStart(b,x,y){lx=x;ly=y;lb=b;clearTimeout(lp);lp=setTimeout(()=>{lp=null;openAny(lb)},380)}
@@ -477,7 +543,8 @@ function splashSoft(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02
  const ng=c.createGain();ng.gain.setValueAtTime(.0001,t);ng.gain.exponentialRampToValueAtTime(.22,t+.02);ng.gain.exponentialRampToValueAtTime(.0001,t+.3);
  n.connect(bp);bp.connect(ng);ng.connect(MG);n.start(t);n.stop(t+.4);
  bubble(c,t,320,.14,.32);for(let k=0;k<5;k++){bubble(c,t+.08+Math.random()*.45,600+Math.random()*1100,.05+Math.random()*.05,.16)}}
-function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null)return;closeCtx();
+function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null||!T[i])return;closeCtx();
+ X.th={id:T[i].id,addr:T[i].addr};
  b.style.transition='none';b.style.transform='';
  const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
  g.removeAttribute('data-i');g.classList.add('ghostrow');
@@ -492,13 +559,15 @@ function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null)return;close
  m.animate([{opacity:0},{opacity:1}],{duration:120});
  spring(m,sc(.3),[sc(1+.1*S.k),sc(1-.04*S.k),sc(1+.015*S.k)],sc(1),700);
  try{if(navigator.vibrate)navigator.vibrate(15)}catch(e){}}
-function doRowDelete(){if(!X.g||X.k!=='row')return;const g=X.g,b=X.b,i=X.i;X.g=null;X.b=null;hideMenu();$('#scrim').classList.remove('on');
+function doRowDelete(){if(!X.g||X.k!=='row')return;const g=X.g,b=X.b,th=X.th||{},i=X.i;X.g=null;X.b=null;X.th=null;hideMenu();$('#scrim').classList.remove('on');
  splashSoft();const r=g.getBoundingClientRect(),A=$('#app').getBoundingClientRect();drops(r.left-A.left+r.width/2,r.top-A.top+r.height/2);
- const finish=()=>{const th=T[i]||{};if(BR&&(th.id||th.addr))try{BR.deleteThread(th.id||0,th.addr||'')}catch(e){};if(T[i])T.splice(i,1);renderRows()};
+ const finish=()=>{if(BR&&(th.id||th.addr))try{BR.deleteThread(th.id||0,th.addr||'')}catch(e){}
+  let k=-1;for(let j=0;j<T.length;j++){const t=T[j];if(th.id?(t.id===th.id):(t.addr===th.addr)){k=j;break}}
+  if(k<0&&T[i]&&T[i].id===th.id)k=i;if(k>=0)T.splice(k,1);renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
-  const cs=getComputedStyle(b);b.style.overflow='hidden';b.animate([{height:b.offsetHeight+'px',paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:260,easing:'ease-out',fill:'forwards'}).onfinish=finish};
+  const cs=getComputedStyle(b);b.style.overflow='hidden';done(b.animate([{height:b.offsetHeight+'px',paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:260,easing:'ease-out',fill:'forwards'}),finish)};
  const a=g.animate([{transform:'scale(1.03)',opacity:1},{transform:'scale(1.1)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-4deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(6deg)',opacity:0}],{duration:S.on?460:200,easing:'ease-in',fill:'forwards'});
- a.onfinish=()=>{g.remove();collapse()}}
+ done(a,()=>{g.remove();collapse()})}
 // long-press on the contact list
 const RW=$('#rows'),okRow=e=>e.target.closest&&e.target.closest('.row');
 RW.addEventListener('pointerdown',e=>{unlockAudio();const r=okRow(e);if(r)lpStart(r,e.clientX,e.clientY)});
@@ -536,7 +605,9 @@ if(BR){$('#newName').placeholder='To: phone number';loadThreads();
  window.__onSmsStatus();
  setTimeout(()=>{if(!BR.isDefaultSms())sheet('#sDefault')},1100)}
 ease();renderRows();
-setTimeout(openApp,250);$('#app').classList.add('on');
+// let openApp() bring the app in: adding .on here would paint it full-size first,
+// then snap it down to the spring's start scale a quarter second later
+setTimeout(openApp,250);
 </script>
 <script>
 /* ---- Native shell bridge (Android WebView) ---- */

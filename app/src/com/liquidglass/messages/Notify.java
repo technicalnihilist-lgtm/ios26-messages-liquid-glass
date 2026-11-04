@@ -53,7 +53,24 @@ final class Notify {
              .setSmallIcon(android.R.drawable.ic_dialog_email)
              .setContentIntent(pi)
              .setAutoCancel(true);
-            nm.notify((int) (System.currentTimeMillis() & 0xffffff), b.build());
+            nm.notify(idFor(from), b.build());
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * One notification per conversation, so a chatty sender replaces their old
+     * notification instead of piling up a new one per message in the shade.
+     */
+    static int idFor(String from) {
+        int h = from == null ? 0 : from.hashCode();
+        return 0x4D530000 | (h & 0xffff);
+    }
+
+    /** Reading a conversation in the app clears its notification. */
+    static void clear(Context ctx, String from) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(idFor(from));
         } catch (Exception ignored) {}
     }
 

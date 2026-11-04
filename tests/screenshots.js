@@ -68,6 +68,9 @@ async function settle(p, ms) {
 // freeze the ambient wallpaper drift so every run produces the same frame
 async function freeze(p) {
   await p.evaluate(() => {
+    // a real phone has no mouse: drop the parallax a stray pointer at the
+    // viewport corner would otherwise leave on the wallpaper and bars
+    if (typeof applyParallax === 'function') applyParallax(0, 0);
     document.querySelectorAll('.blob').forEach(b => b.getAnimations().forEach(a => {
       try { a.pause(); a.currentTime = 0; } catch (e) {}
     }));

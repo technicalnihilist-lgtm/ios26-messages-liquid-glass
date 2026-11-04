@@ -9,19 +9,26 @@ set -euo pipefail
 
 BT="$ANDROID_SDK/build-tools/34.0.0"
 AJAR="$ANDROID_SDK/platforms/android-34/android.jar"
-APP="$(cd "$(dirname "$0")" && pwd)/app"
-OUT="$(cd "$(dirname "$0")" && pwd)/build"
-KS="$(cd "$(dirname "$0")" && pwd)/release.keystore"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+APP="$ROOT/app"
+OUT="$ROOT/build"
+KS="$ROOT/release.keystore"
 
 export PATH="$JAVA_HOME/bin:$PATH"
 rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex"
 cd "$APP"
 
+# the manifest is the single source of truth for the version
+VC="$(sed -n 's/.*android:versionCode="\([0-9]*\)".*/\1/p' AndroidManifest.xml | head -1)"
+VN="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' AndroidManifest.xml | head -1)"
+: "${VC:?could not read android:versionCode from AndroidManifest.xml}"
+: "${VN:?could not read android:versionName from AndroidManifest.xml}"
+
 echo "==> aapt2 compile";  "$BT/aapt2" compile --dir res -o "$OUT/res.zip"
-echo "==> aapt2 link";     "$BT/aapt2" link -o "$OUT/unsigned.apk" -I "$AJAR" \
+echo "==> aapt2 link (v$VN / code $VC)"; "$BT/aapt2" link -o "$OUT/unsigned.apk" -I "$AJAR" \
     --manifest AndroidManifest.xml -A assets --java "$OUT/gen" \
     --min-sdk-version 24 --target-sdk-version 34 \
-    --version-code 10 --version-name 2.5 "$OUT/res.zip"
+    --version-code "$VC" --version-name "$VN" "$OUT/res.zip"
 echo "==> javac";          javac -nowarn -source 8 -target 8 \
     -bootclasspath "$AJAR" -classpath "$AJAR" -d "$OUT/classes" \
     "$OUT/gen/com/liquidglass/messages/R.java" \
@@ -42,4 +49,6 @@ echo "==> sign"
 "$BT/apksigner" sign --ks "$KS" --ks-pass pass:liquidglass --key-pass pass:liquidglass \
   --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
   --out "$OUT/Messages-LiquidGlass.apk" "$OUT/aligned.apk"
-echo "==> done: $OUT/Messages-LiquidGlass.apk"
+mkdir -p "$ROOT/apk"
+cp "$OUT/Messages-LiquidGlass.apk" "$ROOT/apk/Messages-LiquidGlass.apk"
+echo "==> done: $OUT/Messages-LiquidGlass.apk (also copied to apk/)"

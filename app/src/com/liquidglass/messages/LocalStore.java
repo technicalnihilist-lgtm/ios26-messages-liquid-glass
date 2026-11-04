@@ -41,6 +41,19 @@ final class LocalStore {
     }
 
     static synchronized void add(Context ctx, String addr, String body, long when) {
+        add(ctx, addr, body, when, 0);
+    }
+
+    /**
+     * Outgoing text the system provider refused to store (we are not the default
+     * SMS app yet). Without this the bubble disappears from the thread on the
+     * next reload, so a sent conversation looks like it never sent.
+     */
+    static synchronized void addOut(Context ctx, String addr, String body, long when) {
+        add(ctx, addr, body, when, 1);
+    }
+
+    static synchronized void add(Context ctx, String addr, String body, long when, int out) {
         if (addr == null || body == null || body.isEmpty()) return;
         if (isDeleted(ctx, addr, body, when)) return;
         try {
@@ -53,6 +66,7 @@ final class LocalStore {
                 if (o == null) continue;
                 if (addr.equals(o.optString("addr"))
                         && body.equals(o.optString("body"))
+                        && o.optInt("out", 0) == out
                         && Math.abs(when - o.optLong("date")) < 180000L) {
                     return;
                 }
@@ -62,6 +76,7 @@ final class LocalStore {
             o.put("addr", addr);
             o.put("body", body);
             o.put("date", when);
+            o.put("out", out);
             arr.put(o);
             while (arr.length() > MAX) arr.remove(0);
             p.edit().putString(KEY, arr.toString()).apply();

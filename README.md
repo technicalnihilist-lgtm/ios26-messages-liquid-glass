@@ -5,7 +5,7 @@ aesthetic — rebuilt as a real, installable **Android APK**.
 
 The whole UI is one self-contained HTML file running inside a hardened WebView shell
 that talks to Android's real SMS stack — it can be your **default messaging app**.
-No internet permission, no trackers, no libraries, ~58 KB APK.
+No internet permission, no trackers, no libraries, ~70 KB APK.
 
 <p align="center">
   <img src="screenshots/01-home.png" width="220" alt="Home screen">
@@ -30,10 +30,10 @@ No internet permission, no trackers, no libraries, ~58 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.5 (versionCode 10) |
+| Version | 2.6 (versionCode 11) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~66 KB |
+| Size | ~70 KB |
 | Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, notifications |
 | Internet | **not requested** — the app cannot reach the network at all |
 
@@ -154,6 +154,75 @@ node tests/screenshots.js         # re-renders screenshots/
 `ui-tests.js` covers boot, opening a thread, sending, delete + tombstones, the
 poll/receive path, HTML escaping, settings persistence, the default-SMS flow, the
 hardware-back chain and the 3D depth engine, and times a 300-message thread.
+
+## What's new in 2.6 — nothing gets stuck, nothing disappears
+
+**Fixed**
+
+- **The sheet, the menu and the app-close could stay stuck open forever.** All three
+  removed their `on` class only from the Web Animation's `onfinish`. If that animation
+  was cancelled — replaced by another animation on the same property, or a tab that was
+  never given a frame — the sheet stayed up over a dimmed screen and nothing could be
+  touched again. Every one of those animations now settles on finish, on cancel, or on
+  a timeout, and so does the delete chain.
+- **A delete could hit the wrong message.** The bubble menu remembered the message by
+  its *index* and read `T[cur].m[i]` when the animation ended — half a second later.
+  A 6-second poll that reordered the conversation in that window deleted a different
+  text, or the wrong conversation. The thread and message are snapshotted when the menu
+  opens and matched again when the delete lands.
+- **A sent text vanished from the thread when the app was not the default SMS app.**
+  The system provider refuses that write unless you hold the role, and the app kept no
+  copy of its own — so 900 ms later the bubble was gone. Outgoing texts now fall back
+  to the app's own store with their direction, so they still render as blue bubbles.
+  Quick replies through `HeadlessSmsSendService` get the same treatment.
+- **Queued, outbox and failed messages rendered as incoming.** They are outgoing.
+- **A multi-line SMS collapsed into one line.** Bubbles keep their line breaks now.
+- **One notification per message, forever.** Every text got a random notification id,
+  so the shade filled up with them. It is one notification per conversation now, and
+  opening that conversation clears it.
+- **"Set as default" raced the permission dialog.** The role request fired on a 700 ms
+  timer, so it could land while the permission dialog was still up and be dropped. The
+  role request now waits for the permission result before it opens.
+- **The 6-second refresh scanned the whole SMS table** even when you had four threads;
+  it now stops after 300 conversations / 5,000 rows.
+- **A flash of the app at full size on launch.** The shell added `on` immediately and
+  then sprang the app up from 25 % a quarter second later, so it painted full size,
+  jumped small, and grew. The spring now owns the first paint.
+- **A bubble went flat while your finger was on it**, and again while a just-sent bubble
+  popped in: both animations replaced the 3D transform instead of composing with it.
+- **Releasing a touch flattened every bubble in the thread**, dropping the scroll depth
+  until the next scroll. Only the bubble you touched is released now.
+- **Copy** no longer leaves an unhandled promise rejection when the clipboard refuses.
+- `android:allowBackup` is off: the local SMS copies and settings should never be
+  uploaded to a cloud backup, and the README promises nothing leaves the device.
+
+**Faster**
+
+- Scroll depth measures the thread **once per render** instead of one client rect per
+  bubble per frame, and reuses the layout instead of forcing a relayout after every
+  write: **9.5 ms → 3.7 ms per frame** on a 300-message thread in the harness.
+- The conversation list and the thread it opens now move on the same curve for the same
+  duration — the list used to finish its push 250 ms before the thread arrived.
+- Pointer parallax and bubble tilt are throttled to one update per frame instead of one
+  per pointer event.
+- The splash sound reuses a single noise buffer instead of filling 1–2 s of random
+  samples on every delete.
+
+**Left alone on purpose** (fixing them would visibly change approved motion, so they
+are reported rather than patched):
+
+- The nav-bar parallax string is still missing its closing paren. The CSS parser
+  tolerates it and the bars do shift, so this is cosmetic only — left as approved.
+- The wallpaper blobs' parallax transform is still overridden by the infinite `drift`
+  animation, so they drift but do not follow the pointer. Making them follow would
+  change how the wallpaper moves.
+- The safe-area inset is applied twice (`:root` padding and `.scroll` padding). It is
+  0 inside the WebView shell, so nothing moves today; changing it would shift every
+  screen on a notched phone.
+
+**Note:** this APK is signed with the build machine's local dev key, which differs from
+the one used for 2.5 — uninstall the old build before installing this one.
+
 
 ## What's new in 2.5 — safety, correctness and speed
 

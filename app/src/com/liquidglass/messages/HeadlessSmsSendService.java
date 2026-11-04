@@ -1,10 +1,12 @@
 package com.liquidglass.messages;
 
 import android.app.Service;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
+import android.provider.Telephony;
 import android.telephony.SmsManager;
 
 import java.util.ArrayList;
@@ -35,6 +37,20 @@ public class HeadlessSmsSendService extends Service {
                         if (sm != null) {
                             ArrayList<String> parts = sm.divideMessage(text);
                             sm.sendMultipartTextMessage(addr, null, parts, null, null);
+                            // record it, exactly like the in-app send path does, so a
+                            // quick reply does not vanish from the conversation
+                            long now = System.currentTimeMillis();
+                            Uri stored = null;
+                            try {
+                                ContentValues v = new ContentValues();
+                                v.put(Telephony.Sms.ADDRESS, addr);
+                                v.put(Telephony.Sms.BODY, text);
+                                v.put(Telephony.Sms.DATE, now);
+                                v.put(Telephony.Sms.READ, 1);
+                                v.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT);
+                                stored = getContentResolver().insert(Telephony.Sms.CONTENT_URI, v);
+                            } catch (Exception ignored) {}
+                            if (stored == null) LocalStore.addOut(this, addr, text, now);
                         }
                     }
                 }

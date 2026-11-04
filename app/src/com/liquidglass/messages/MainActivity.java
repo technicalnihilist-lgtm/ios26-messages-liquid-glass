@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private boolean pageLoaded;
+    private boolean pendingRole;   // the role dialog waits for the permission result
     private String pendingAddress;
     private BroadcastReceiver smsChanged;
     private final Handler poll = new Handler(Looper.getMainLooper());
@@ -261,6 +262,7 @@ public class MainActivity extends Activity {
         }
         if (ask.isEmpty()) {
             pushStatus();
+            if (pendingRole) { pendingRole = false; askDefaultRole(); }
             return;
         }
         requestPermissions(ask.toArray(new String[0]), REQ_PERMS);
@@ -286,6 +288,10 @@ public class MainActivity extends Activity {
         js("window.__onSmsStatus && window.__onSmsStatus()");
         if (code == REQ_CONTACTS) {
             js("window.__onContactsReady && window.__onContactsReady()");
+        }
+        if (pendingRole) {
+            pendingRole = false;
+            if (hasSmsPermissions()) askDefaultRole();
         }
     }
 
@@ -342,6 +348,13 @@ public class MainActivity extends Activity {
             js("window.__onSmsStatus && window.__onSmsStatus()");
             return;
         }
+        // Android will not put the role dialog over a permission dialog, so ask
+        // for the permissions first and continue once the user has answered.
+        if (!hasSmsPermissions()) {
+            pendingRole = true;
+            askPermissions();
+            return;
+        }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 RoleManager rm = getSystemService(RoleManager.class);
@@ -377,7 +390,10 @@ public class MainActivity extends Activity {
                             Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ},
                     null, null, Telephony.Sms.DATE + " DESC");
             if (c != null) {
-                while (c.moveToNext() && seen.size() < 300) {
+                // newest first: 300 conversations are enough, and stopping after a
+                // few thousand rows keeps the query cheap on a phone with 100k texts
+                int scanned = 0;
+                while (c.moveToNext() && seen.size() < 300 && scanned++ < 5000) {
                     long threadId = c.getLong(1);
                     if (seen.containsKey(threadId)) continue;
                     String addr = c.getString(2);
@@ -453,11 +469,16 @@ public class MainActivity extends Activity {
                         String body = c.getString(1) == null ? "" : c.getString(1);
                         long when = c.getLong(2);
                         if (LocalStore.isDeleted(this, addr, body, when)) continue;
+                        int type = c.getInt(3);
                         JSONObject o = new JSONObject();
                         o.put("id", c.getLong(0));
                         o.put("body", body);
                         o.put("date", when);
-                        o.put("out", c.getInt(3) == Telephony.Sms.MESSAGE_TYPE_SENT ? 1 : 0);
+                        // outbox / queued / failed are still our own messages, not theirs
+                        o.put("out", (type == Telephony.Sms.MESSAGE_TYPE_SENT
+                                || type == Telephony.Sms.MESSAGE_TYPE_OUTBOX
+                                || type == Telephony.Sms.MESSAGE_TYPE_QUEUED
+                                || type == Telephony.Sms.MESSAGE_TYPE_FAILED) ? 1 : 0);
                         all.add(o);
                     }
                 }
@@ -488,7 +509,7 @@ public class MainActivity extends Activity {
                 o.put("id", 0);
                 o.put("body", body);
                 o.put("date", when);
-                o.put("out", 0);
+                o.put("out", m.optInt("out", 0));
                 all.add(o);
             }
         } catch (Exception ignored) {}
@@ -522,7 +543,10 @@ public class MainActivity extends Activity {
 
     private void markThreadRead(long threadId, String addr) {
         if (threadId == 0 && (addr == null || addr.isEmpty())) return;
-        if (addr != null && !addr.isEmpty()) LocalStore.markRead(this, addr);
+        if (addr != null && !addr.isEmpty()) {
+            LocalStore.markRead(this, addr);
+            Notify.clear(this, addr);   // reading it here clears its notification
+        }
         if (threadId <= 0) return;
         try {
             ContentValues v = new ContentValues();
@@ -543,16 +567,21 @@ public class MainActivity extends Activity {
             ArrayList<String> parts = sm.divideMessage(body);
             sm.sendMultipartTextMessage(addr, null, parts, null, null);
 
-            // keep our own record of the outgoing text
+            // Keep our own record of the outgoing text. The provider only accepts
+            // this write while we hold the default-SMS role, so fall back to our
+            // own store: otherwise the bubble vanishes on the next reload.
+            long now = System.currentTimeMillis();
+            Uri stored = null;
             try {
                 ContentValues v = new ContentValues();
                 v.put(Telephony.Sms.ADDRESS, addr);
                 v.put(Telephony.Sms.BODY, body);
-                v.put(Telephony.Sms.DATE, System.currentTimeMillis());
+                v.put(Telephony.Sms.DATE, now);
                 v.put(Telephony.Sms.READ, 1);
                 v.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT);
-                getContentResolver().insert(Telephony.Sms.CONTENT_URI, v);
+                stored = getContentResolver().insert(Telephony.Sms.CONTENT_URI, v);
             } catch (Exception ignored) {}
+            if (stored == null) LocalStore.addOut(this, addr, body, now);
             return true;
         } catch (Exception e) {
             return false;
