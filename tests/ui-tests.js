@@ -276,6 +276,66 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('a poll does not drop the conversation you just composed', async () => {
+    const p = await open(browser);
+    await p.click('#compose');
+    await p.waitForTimeout(350);
+    await p.fill('#newName', '+91 90000 00001');
+    await p.click('#startChat');
+    await p.waitForTimeout(700);
+    // the 6s poll rebuilds the list from the store; an unsent conversation has
+    // no provider id yet, and losing it made the next Send do nothing at all
+    await p.evaluate(() => window.__onSmsPoll());
+    await p.waitForTimeout(300);
+    assert(await p.evaluate(() => cur) !== null, 'the poll dropped the open conversation');
+    await p.fill('#txt', 'first text');
+    await p.click('#send');
+    await p.waitForTimeout(700);
+    const calls = await p.evaluate(() => window.__mockCalls('sendSms'));
+    assert(calls.length === 1, 'nothing was sent after the poll: ' + JSON.stringify(calls));
+    assert(calls[0][1] === '+91 90000 00001', 'sent to the wrong address: ' + calls[0][1]);
+    await p.context().close();
+  });
+
+  await test('composing a number that already has a conversation reuses it', async () => {
+    const p = await open(browser);
+    await p.click('#compose');
+    await p.waitForTimeout(350);
+    await p.fill('#newName', 'Aanya');
+    await p.click('#startChat');
+    await p.waitForTimeout(700);
+    const rows = await p.$$eval('#rows .row', els => els.length);
+    assert(rows === 3, 'a duplicate conversation row appeared, rows=' + rows);
+    const id = await p.evaluate(() => T[cur] && T[cur].id);
+    assert(id === 11, 'opened a copy instead of the real thread, id=' + id);
+    await p.context().close();
+  });
+
+  await test('an incoming message does not rebuild the thread under an open menu', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.evaluate(() => openCtx(document.querySelectorAll('#msgs .bub')[0]));
+    await p.waitForTimeout(200);
+    await p.evaluate(() => {
+      window.__mockPush('Aanya', 'while the menu is open', 0);
+      const t = window.__mock.threads.find(x => x.addr === 'Aanya');
+      t.snippet = 'while the menu is open'; t.date = Date.now();
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(400);
+    const hidden = await p.$$eval('#msgs .bub', els =>
+      els.filter(e => getComputedStyle(e).visibility === 'hidden').length);
+    assert(hidden === 1, 'the bubble the menu is anchored to was replaced, hidden=' + hidden);
+    assert(await p.$$eval('#app > .bub', els => els.length) === 1, 'no floating copy');
+    await p.click('#scrim', { position: { x: 12, y: 420 } });
+    await p.waitForTimeout(700);
+    const txt = await p.$$eval('#msgs .bub', els => els.map(e => e.textContent.trim()));
+    assert(txt.includes('while the menu is open'), 'deferred render never flushed: ' + JSON.stringify(txt));
+    assert(await p.$$eval('#app > .bub', els => els.length) === 0, 'floating copy left behind');
+    await p.context().close();
+  });
+
   console.log('\n— safety —');
   await test('message text is HTML-escaped (no injection through the bridge)', async () => {
     const evil = '<img src=x onerror="window.__xss=1">AT&T <b>bold</b>';

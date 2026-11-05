@@ -414,6 +414,10 @@ public class MainActivity extends Activity {
 
         // fold in everything we received ourselves - this is what makes new texts appear
         try {
+            // address -> conversation. Scanning `seen` for every stored message made
+            // this quadratic (300 threads x 800 stored texts, on every poll).
+            Map<String, JSONObject> byAddr = new java.util.HashMap<>();
+            for (JSONObject o : seen.values()) byAddr.put(LocalStore.norm(o.optString("addr")), o);
             JSONArray local = LocalStore.all(this);
             for (int i = 0; i < local.length(); i++) {
                 JSONObject m = local.optJSONObject(i);
@@ -421,10 +425,8 @@ public class MainActivity extends Activity {
                 String addr = m.optString("addr");
                 long when = m.optLong("date");
                 if (LocalStore.isDeleted(this, addr, m.optString("body"), when)) continue;
-                JSONObject existing = null;
-                for (JSONObject o : seen.values()) {
-                    if (addr.equals(o.optString("addr"))) { existing = o; break; }
-                }
+                // same person, possibly written as "+91 98765 43210" and "+919876543210"
+                JSONObject existing = byAddr.get(LocalStore.norm(addr));
                 boolean fresh = when > LocalStore.readAt(this, addr);
                 if (existing == null) {
                     JSONObject o = new JSONObject();
@@ -434,6 +436,7 @@ public class MainActivity extends Activity {
                     o.put("date", when);
                     o.put("unread", fresh ? 1 : 0);
                     seen.put(o.optLong("id"), o);
+                    byAddr.put(LocalStore.norm(addr), o);
                 } else if (when >= existing.optLong("date")) {
                     existing.put("snippet", m.optString("body"));
                     existing.put("date", when);
@@ -490,18 +493,29 @@ public class MainActivity extends Activity {
 
         // our own copies (they also cover the "not the default app yet" case)
         try {
-            JSONArray local = LocalStore.forAddress(this, addr);
+            // body -> dates already in the thread. The old nested loop compared
+            // every stored message with every provider row on each poll.
+            Map<String, List<Long>> seenBody = new java.util.HashMap<>();
+            for (JSONObject o : all) {
+                String b = o.optString("body");
+                List<Long> dates = seenBody.get(b);
+                if (dates == null) { dates = new ArrayList<>(); seenBody.put(b, dates); }
+                dates.add(o.optLong("date"));
+            }
+            JSONArray local = LocalStore.forAddressLike(this, addr);
             for (int i = 0; i < local.length(); i++) {
                 JSONObject m = local.optJSONObject(i);
                 if (m == null) continue;
                 String body = m.optString("body");
                 long when = m.optLong("date");
-                if (LocalStore.isDeleted(this, addr, body, when)) continue;
+                String laddr = m.optString("addr");
+                if (laddr.isEmpty()) laddr = addr;
+                if (LocalStore.isDeleted(this, laddr, body, when)) continue;
                 boolean dup = false;
-                for (JSONObject o : all) {
-                    if (body.equals(o.optString("body")) && Math.abs(when - o.optLong("date")) < 180000L) {
-                        dup = true;
-                        break;
+                List<Long> dates = seenBody.get(body);
+                if (dates != null) {
+                    for (int d = 0; d < dates.size(); d++) {
+                        if (Math.abs(when - dates.get(d)) < 180000L) { dup = true; break; }
                     }
                 }
                 if (dup) continue;
@@ -699,12 +713,12 @@ public class MainActivity extends Activity {
             return messagesJson(threadId, addr);
         }
 
-        @JavascriptInterface
-        public void markRead(long threadId) {
-            markThreadRead(threadId, threadId > 0 ? addrForThread(threadId) : null);
-        }
-
-        /** Synthetic (negative) thread ids carry no address, so the page passes it. */
+        /**
+         * The page always passes the address as well: a synthetic (negative)
+         * thread id carries none. Only this one overload may exist - the WebView
+         * bridge registers javascript methods by name, so a second markRead()
+         * would replace this one and every call from the page would throw.
+         */
         @JavascriptInterface
         public void markRead(long threadId, String addr) {
             String resolved = addr;

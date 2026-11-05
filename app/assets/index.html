@@ -189,13 +189,19 @@ function loadThreads(){if(!BR)return false;try{
  const openId=(cur!==null&&T[cur])?T[cur].id:null,openAddr=(cur!==null&&T[cur])?T[cur].addr:null;
  const arr=JSON.parse(BR.loadThreads());
  const sig=arr.map(t=>t.id+'|'+t.date+'|'+t.snippet+'|'+t.unread).join('~');
+ /* A conversation that exists only on this side (compose -> no provider id yet)
+    has to survive a poll. Rebuilding T from the store alone dropped it, which
+    left cur pointing at nothing and made the next Send silently do nothing. */
+ const local=T.filter(t=>t.local&&!arr.some(a=>a.addr===t.addr));
  T.length=0;
- arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),u:t.unread>0,m:[{x:t.snippet||''}]}));
+ arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),d:t.date,u:t.unread>0,m:[{x:t.snippet||''}]}));
+ local.forEach(t=>T.push(t));
+ const sig2=sig+'|L'+local.map(t=>t.addr).join(',');
  if(cur!==null){let k=-1;
   if(openId&&openId>0)k=T.findIndex(x=>x.id===openId);
   else if(openAddr)k=T.findIndex(x=>x.addr===openAddr);
   cur=k>=0?k:null}
- if(sig!==lastSig){lastSig=sig;renderRows();return true}return false}catch(e){return false}}
+ if(sig2!==lastSig){lastSig=sig2;renderRows();return true}return false}catch(e){return false}}
 function loadMsgs(i){const t=T[i];if(!BR||!t)return;try{
  const arr=JSON.parse(BR.loadMessages(t.id||0,t.addr));
  t.m=arr.map(m=>({id:m.id,f:m.out?1:0,x:m.body,d:m.date}))}catch(e){}}
@@ -222,21 +228,27 @@ function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
 function renderRows(){const q=$('#q').value.toLowerCase();$('#rows').innerHTML=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
  return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>'}
-function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.date||Date.now(),d=new Date(ms),n=new Date();
+/* an empty conversation has no message to take a date from: use the thread's
+   own date, not the clock, or the stamp changes every time the page opens */
+function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.d||Date.now(),d=new Date(ms),n=new Date();
  const hm=((d.getHours()%12)||12)+':'+String(d.getMinutes()).padStart(2,'0');
  let day;
  if(d.toDateString()===n.toDateString())day='Today';
  else{const y=new Date(n.getTime()-86400000);day=d.toDateString()===y.toDateString()?'Yesterday':d.toLocaleDateString(undefined,{weekday:'short'})}
  return `<div class="stamp"><b>${esc(day)}</b> ${hm}</div>`}
 function renderThread(keepScroll){const t=T[cur];if(!t)return;
+ /* rebuilding the list under an open long-press menu replaces the bubble the
+    menu is anchored to: the copy then floats over a duplicate of itself */
+ if(X.g){deferRender=true;return}deferRender=false;
  bubCache=null;geoReset();
  const s=$('#tscroll'),prevTop=s.scrollTop,wasBottom=(s.scrollHeight-s.scrollTop-s.clientHeight)<48;
  $('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><span>${esc(t.n)}</span>`;
- let h=stampFor(t),p=null;
- t.m.forEach((m,i)=>{h+=`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${esc(m.x)}</div>`;p=m.f});
- if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)h+='<div class="dl">Delivered</div>';
- if(t.typing)h+='<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>';
- $('#msgs').innerHTML=h;
+ const out=[stampFor(t)];let p=null;
+ for(let i=0;i<t.m.length;i++){const m=t.m[i];
+  out.push(`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${esc(m.x)}</div>`);p=m.f}
+ if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)out.push('<div class="dl">Delivered</div>');
+ if(t.typing)out.push('<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>');
+ $('#msgs').innerHTML=out.join('');
  s.scrollTop=(keepScroll&&!wasBottom)?prevTop:s.scrollHeight;
  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
 function openThread(i){cur=i;T[i].u=false;loadMsgs(i);
@@ -246,7 +258,7 @@ function openThread(i){cur=i;T[i].u=false;loadMsgs(i);
  $('#list').style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;
  $('#list').style.transform='translateX(-25%)'}
 function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
-function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];
+function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];if(!t)return;
  if(BR){
   if(!BR.hasSmsPermission()){BR.requestSmsPermission();return}
   t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
@@ -258,7 +270,8 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
  const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
  const ci=cur;t.typing=true;setTimeout(()=>{if(cur===ci){renderThread();const e=[...document.querySelectorAll('.typing')].pop();e&&pop(e)}},500);
  setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('.bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
-function sheet(id){$('#scrim').classList.add('on');const s=$(id);s.classList.add('on');spring(s,'translateY(110%)',['translateY(-'+(2+S.k*10)+'px)','translateY('+(S.k*4)+'px)','translateY(-'+S.k*2+'px)'],'translateY(0)',700)}
+function sheet(id){document.querySelectorAll('.sheet.on').forEach(o=>{if('#'+o.id!==id)o.classList.remove('on')});
+ $('#scrim').classList.add('on');const s=$(id);s.classList.add('on');spring(s,'translateY(110%)',['translateY(-'+(2+S.k*10)+'px)','translateY('+(S.k*4)+'px)','translateY(-'+S.k*2+'px)'],'translateY(0)',700)}
 function closeSheets(){document.querySelectorAll('.sheet.on').forEach(s=>{if(!S.on){s.classList.remove('on');return}
  const a=s.animate([{transform:'translateY(0)'},{transform:'translateY(-'+S.k*8+'px)',offset:.25},{transform:'translateY(110%)'}],{duration:(1.1-S.sp)*400,easing:'ease-in'});done(a,()=>s.classList.remove('on'))});$('#scrim').classList.remove('on');closeCtx()}
 // press bounce on everything touchable
@@ -277,7 +290,11 @@ function rel(){if(!pr)return;const el=pr;pr=null;
 // wiring
 $('#openApp').onclick=()=>setTimeout(openApp,60);
 $('#closeApp').onclick=()=>setTimeout(closeApp,120);
-$('#rows').onclick=e=>{const r=e.target.closest('.row');if(r&&Date.now()-lpFired>700&&!X.g)setTimeout(()=>openThread(+r.dataset.i),120)};
+/* a poll can rebuild #rows between the tap and this timeout, so carry the
+   conversation (id + address) instead of a list index that has since moved */
+$('#rows').onclick=e=>{const r=e.target.closest('.row');if(!r||Date.now()-lpFired<700||X.g)return;
+ const t=T[+r.dataset.i],snap=t?{id:t.id,addr:t.addr}:null;
+ setTimeout(()=>{const k=snap?findThread(snap.addr,snap.id):-1;if(k>=0)openThread(k)},120)};
 $('#back').onclick=()=>setTimeout(backThread,100);
 $('#send').onclick=sendMsg;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendMsg()};
 $('#q').oninput=renderRows;
@@ -287,8 +304,16 @@ $('#newName').oninput=function(){$('#startChat').disabled=!this.value.trim()};
 $('#newName').onkeydown=function(e){if(e.key==='Enter'&&this.value.trim())startChat()};
 $('#startChat').onclick=()=>startChat();
 function startChat(){const n=$('#newName').value.trim();if(!n)return;$('#newName').blur();closeSheets();setTimeout(()=>newChat(n),280)}
-function newChat(addr){const i=T.length;
- T.push({id:0,addr:addr,n:addr,c:colorFor(addr),t:'Now',u:false,m:[]});
+/* one conversation per address: "+91 98765 43210" and "+919876543210" are the
+   same person, so a composed number must open the existing thread, not clone it */
+function nrm(a){return String(a==null?'':a).replace(/[^0-9A-Za-z]/g,'').toLowerCase()}
+function findThread(addr,id){let k=-1;
+ if(id&&id>0)k=T.findIndex(t=>t.id===id);
+ if(k<0){const n=nrm(addr);k=T.findIndex(t=>t.addr===addr||(n!==''&&nrm(t.addr)===n))}
+ return k}
+function newChat(addr){const k=findThread(addr,0);if(k>=0){openThread(k);return k}
+ const i=T.length;
+ T.push({id:0,addr:addr,n:addr,c:colorFor(addr),t:'Now',u:false,m:[],local:1});
  renderRows();openThread(i);return i}
 
 $('#scrim').onclick=()=>{if(X.g&&Date.now()-(X.t||0)<400)return;closeSheets()};document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>setTimeout(closeSheets,100));
@@ -359,8 +384,11 @@ function depthScroll(){
  const ks=new Array(n),g=depthGeo(bubs,sc);
  for(let i=0;i<n;i++){const q=g[i];
    ks[i]=q?Math.min(1,Math.abs(q.t+q.h/2-top-mid)/h*1.6):-1}
+ /* a number beats a toFixed() string: this was two toFixed() calls per bubble
+    on every frame, 600 of them on a 300-message thread */
+ const sq=(s*1000)|0;
  for(let i=0;i<n;i++){const b=bubs[i],k=ks[i];if(k<0)continue;
-   const sig=k.toFixed(3)+'|'+s.toFixed(3);
+   const sig=((k*1000)|0)*4096+sq;
    if(b.__dk===sig)continue;
    b.__dk=sig;
    // positive Z only: keeps every bubble in front of its parent plane so taps still land
@@ -400,7 +428,7 @@ window.addEventListener('deviceorientation',e=>{
 // tilt a bubble toward the finger
 function bubbleTilt(b,e){
  if(!D.on||!b)return;
- const r=b.getBoundingClientRect();
+ const r=b.getBoundingClientRect();if(!r.width||!r.height)return;
  const nx=clamp1(((e.clientX-r.left)/r.width-.5)*2),ny=clamp1(((e.clientY-r.top)/r.height-.5)*2);
  const s=D.tilt*2;
  b.style.setProperty('--ry',(nx*16*s).toFixed(1)+'deg');
@@ -480,10 +508,15 @@ function splash(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02;
  // 4) little bubbles / drips
  for(let k=0;k<14;k++){const bt=t+.04+Math.pow(Math.random(),.8)*1.05;bubble(c,bt,500+Math.random()*1300,.05+Math.random()*.07,.3*(1-(bt-t)/1.4))}}
 const X={b:null,g:null,i:-1};
+let deferRender=false;   // a poll asked for a re-render while the long-press menu was open
 function hideMenu(){const m=$('#ctx');if(!m.classList.contains('on'))return;if(!S.on){m.classList.remove('on');return}
  const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});done(a,()=>m.classList.remove('on'))}
-function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}if(X.b){X.b.style.visibility='';X.b=null}}
+function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}if(X.b){X.b.style.visibility='';X.b=null}
+ X.msg=null;X.th=null;X.k=null;X.i=-1;
+ /* a poll that landed while the menu was open deliberately re-rendered nothing */
+ if(deferRender){deferRender=false;if(cur!==null){loadMsgs(cur);renderThread(true)}}}
 function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected)return;closeCtx();
+ if(!b.isConnected)return;   // closeCtx may have flushed a deferred re-render
  const th=T[cur],mm=th&&th.m[i]?th.m[i]:null;if(!th||!mm)return;
  // snapshot the thread + message now: a poll can reorder the list while the menu is open
  X.th={id:th.id,addr:th.addr};X.msg={id:mm.id,x:mm.x,d:mm.d};
@@ -510,11 +543,12 @@ function doDelete(){if(!X.g)return;const g=X.g,b=X.b,snap=X.msg,th=X.th,ci=cur;X
  splash();const r=g.getBoundingClientRect(),A=$('#app').getBoundingClientRect();drops(r.left-A.left+r.width/2,r.top-A.top+r.height/2);
  const finish=()=>{const sc0=$('#tscroll').scrollTop;
   if(BR&&snap){try{if(snap.id)BR.deleteMessage(snap.id);else if(BR.deleteLocalMessage)BR.deleteLocalMessage((th&&th.addr)||'',snap.x,snap.d||0)}catch(e){}}
-  const t=ci!==null?T[ci]:null;
+  const ci2=(th&&(th.id||th.addr))?findThread(th.addr,th.id):(ci!==null?ci:-1);
+  const t=ci2>=0?T[ci2]:null;
   if(t&&snap){let k=-1;for(let j=0;j<t.m.length;j++){const m=t.m[j];
    if(snap.id?(m.id===snap.id):(m.x===snap.x&&Math.abs((m.d||0)-(snap.d||0))<2000)){k=j;break}}
    if(k>=0)t.m.splice(k,1)}
-  if(cur===ci){renderThread();$('#tscroll').scrollTop=sc0}renderRows()};
+  if(cur===ci2){renderThread();$('#tscroll').scrollTop=sc0}renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
   const cs=getComputedStyle(b);done(b.animate([{height:b.offsetHeight+'px',marginTop:cs.marginTop,paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',marginTop:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:220,easing:'ease-out',fill:'forwards'}),finish)};
  const a=g.animate([{transform:'scale(1.05)',opacity:1},{transform:'scale(1.15)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-6deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(8deg)',opacity:0}],{duration:S.on?520:200,easing:'ease-in',fill:'forwards'});
@@ -603,7 +637,7 @@ window.__composeTo=function(addr){if(!addr)return;const k=T.findIndex(t=>t.addr=
  if(k>=0)openThread(k);else{openApp();newChat(addr)}};
 if(BR){$('#newName').placeholder='To: phone number';loadThreads();
  window.__onSmsStatus();
- setTimeout(()=>{if(!BR.isDefaultSms())sheet('#sDefault')},1100)}
+ setTimeout(()=>{if(!BR.isDefaultSms()&&cur===null&&!document.querySelector('.sheet.on'))sheet('#sDefault')},1100)}
 ease();renderRows();
 // let openApp() bring the app in: adding .on here would paint it full-size first,
 // then snap it down to the spring's start scale a quarter second later

@@ -19,6 +19,8 @@ final class Notify {
     // both receivers can see the same text; never notify twice for one SMS
     private static String lastKey;
     private static long lastAt;
+    // creating a channel is idempotent but not free: do it once per process
+    private static boolean channelsMade;
 
     static void message(Context ctx, String from, String body) {
         try {
@@ -29,11 +31,12 @@ final class Notify {
             lastAt = now;
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !channelsMade) {
                 NotificationChannel ch = new NotificationChannel(MSG_CHANNEL, "Messages",
                         NotificationManager.IMPORTANCE_HIGH);
                 ch.enableVibration(true);
                 nm.createNotificationChannel(ch);
+                channelsMade = true;
             }
 
             Intent open = new Intent(ctx, MainActivity.class);
@@ -78,10 +81,11 @@ final class Notify {
         try {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !channelsMade) {
                 NotificationChannel ch = new NotificationChannel(MMS_CHANNEL, "Multimedia messages",
                         NotificationManager.IMPORTANCE_DEFAULT);
                 nm.createNotificationChannel(ch);
+                channelsMade = true;
             }
             Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? new Notification.Builder(ctx, MMS_CHANNEL)

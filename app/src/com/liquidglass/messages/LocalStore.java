@@ -199,9 +199,43 @@ final class LocalStore {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Comparison key for a phone number: digits and letters only, with the Indian
+     * "91" country code dropped, so "+91 98765 43210" and "+919876543210" are the
+     * same conversation. Only used for matching - the address itself is never
+     * rewritten, so nothing the user sees changes.
+     */
+    static String norm(String addr) {
+        if (addr == null) return "";
+        StringBuilder b = new StringBuilder(addr.length());
+        for (int i = 0; i < addr.length(); i++) {
+            char ch = addr.charAt(i);
+            if (ch >= '0' && ch <= '9') b.append(ch);
+            else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) b.append(Character.toLowerCase(ch));
+        }
+        String s = b.toString();
+        if (s.length() == 12 && s.startsWith("91")) s = s.substring(2);
+        return s;
+    }
+
+    /** Stored copies for an address, matching however the number was written. */
+    static synchronized JSONArray forAddressLike(Context ctx, String addr) {
+        JSONArray out = new JSONArray();
+        if (addr == null) return out;
+        String key = norm(addr);
+        JSONArray all = all(ctx);
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject o = all.optJSONObject(i);
+            if (o != null && (addr.equals(o.optString("addr")) || key.equals(norm(o.optString("addr"))))) out.put(o);
+        }
+        return out;
+    }
+
     /** Stable synthetic thread id for addresses that only exist in our own store. */
     static long syntheticThreadId(String addr) {
         if (addr == null) return -1;
-        return -1L * (Math.abs(addr.hashCode()) + 1L);
+        // Math.abs(Integer.MIN_VALUE) is still negative, which produced a positive
+        // "synthetic" id that collided with a real provider thread id
+        return -1L * ((addr.hashCode() & 0x7fffffffL) + 1L);
     }
 }

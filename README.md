@@ -27,10 +27,15 @@ No internet permission, no trackers, no libraries, ~70 KB APK.
 2. Tap it and allow *"Install unknown apps"* for your browser or file manager.
 3. Open **Messages** from the app drawer.
 
+> **Upgrading from 2.6 or older:** uninstall the old build first. Earlier releases
+> were each signed with a key generated during the build, so Android refuses to
+> install one over another ("App not installed"). 2.7 is the first build whose key
+> is kept for future releases — from here on updates install in place.
+
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.6 (versionCode 11) |
+| Version | 2.7 (versionCode 12) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~70 KB |
@@ -138,7 +143,8 @@ export ANDROID_SDK=/path/to/android-sdk     # needs build-tools/34.0.0 + platfor
 `build.sh` compiles resources with `aapt2`, compiles the single Java class against
 `android.jar`, dexes with `d8`, aligns with `zipalign` and signs with `apksigner`.
 It generates a local keystore on first run — **replace it with your own key before
-publishing to the Play Store**.
+publishing to the Play Store**, and **keep that key**: every release must be signed
+with the same one, or Android refuses to install it over the previous build.
 
 ### Tests
 
@@ -147,13 +153,86 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 26 behavioural checks
+node tests/ui-tests.js            # 29 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
 `ui-tests.js` covers boot, opening a thread, sending, delete + tombstones, the
 poll/receive path, HTML escaping, settings persistence, the default-SMS flow, the
-hardware-back chain and the 3D depth engine, and times a 300-message thread.
+hardware-back chain and the 3D depth engine, and times a 300-message thread. Three
+of the checks are regressions from 2.7: a poll must not drop a conversation you just
+composed, composing an existing number must not clone it, and an incoming message
+must not rebuild the thread under an open long-press menu.
+
+## What's new in 2.7 — sends that land, conversations that stay
+
+**Fixed**
+
+- **A text was silently not sent in a brand-new conversation.** Compose a number,
+  wait a few seconds, type and tap Send — and nothing happened at all: no bubble, no
+  `sendSms`, nothing. The 6-second poll rebuilt the conversation list from the SMS
+  store, and a conversation you had just composed has no provider id yet, so it was
+  dropped from the list, the open-thread pointer went to `null` and `sendMsg()` returned
+  on its first line. Conversations that exist only on this side now survive the rebuild,
+  and the open thread is still resolved by address.
+- **Composing a number that already had a conversation made a second one.** Two rows for
+  the same person — one real, one empty — until the next poll cleaned it up. A composed
+  address is now matched against the list first (ignoring formatting, so
+  `+91 98765 43210` and `+919876543210` are the same person) and the existing thread
+  opens instead of a copy.
+- **A tap on a conversation could open a different one.** The row handler waited 120 ms
+  before opening `T[index]`, and a poll landing in that window renumbered the list. The
+  tap now carries the conversation's id and address and is resolved when it opens.
+- **An incoming message rebuilt the thread underneath an open long-press menu.** The
+  bubble the menu was anchored to was replaced by a fresh copy of itself, so the floating
+  ghost ended up sitting on top of a duplicate, and Delete pointed at an element that no
+  longer existed. Re-renders are deferred while the menu is open and flushed when it
+  closes.
+- **An empty conversation showed the current clock as its date stamp.** `stampFor()` read
+  a `date` field the thread list never stored and fell back to `Date.now()`, so the stamp
+  changed on every launch (and made the screenshot non-reproducible). The list keeps the
+  raw date and the stamp uses it.
+- **Two sheets could be open at once** — Settings while the default-SMS prompt appeared
+  over it, or any sheet over another. Only one sheet is shown at a time, and the prompt
+  no longer interrupts a conversation.
+- **`markRead` was declared twice in the JS bridge.** The WebView registers bridge
+  methods by name, so one overload silently replaced the other and a call carrying the
+  address could throw. There is a single method now, and it always takes the address.
+- **A deleted conversation could come back as a separate row.** Local backup copies were
+  matched to provider rows by exact string, so the same number written two ways produced
+  two conversations. Matching now normalises the number; the address shown is unchanged.
+- **Synthetic thread ids could collide with real ones.** `Math.abs(Integer.MIN_VALUE)` is
+  still negative, so the "negative" id for a local-only conversation came out positive
+  and could shadow a provider thread.
+- **A zero-size bubble divided by zero** in the tilt handler, writing `NaNdeg` into the
+  CSS variables.
+
+**Optimised** (measured in the harness on a 300-message thread, median of 7)
+
+- **Scroll depth stopped formatting strings.** The change signature was
+  `k.toFixed(3)+'|'+s.toFixed(3)` — two `toFixed()` calls per bubble per frame, 600 of
+  them on a 300-message thread. It is one integer compare now: 0.33 ms → 0.28 ms per
+  frame when nothing has moved, and ~15.0 ms → ~14.1 ms when the harness forces a
+  layout on every frame (most of that is the scroll's own layout and paint, not the
+  depth pass).
+- **The 6-second poll no longer goes quadratic in Java.** `threadsJson()` compared every
+  stored message against every conversation (up to 300 × 800 string comparisons per
+  poll), and `messagesJson()` de-duplicated stored copies against every row of the
+  thread (300 × 300 per poll). Both use an index now. This is the work that runs every
+  6 seconds while a conversation is open, on the JavaBridge thread.
+- **Notification channels are created once per process**, not on every message.
+- The thread is now built as one array and joined once instead of 300 string
+  concatenations. Neutral in the benchmark (V8 handles both), kept because it reads
+  better and cannot regress.
+
+**Reported, not patched** (each would change the approved design)
+
+- The bar/blob parallax transform string is missing its closing parenthesis and the blob
+  transform is overridden by the infinite drift animation, so neither the bars nor the
+  wallpaper actually move on tilt. Repairing either one is a motion change, so it stays
+  as approved.
+- `applyParallax()` also writes `transform` on `.blob` elements whose `drift` animation
+  owns that property — same story.
 
 ## What's new in 2.6 — nothing gets stuck, nothing disappears
 
@@ -415,7 +494,9 @@ you get a notification saying so, instead of the message vanishing silently.
 - Deletions are recorded as tombstones in the same store and filtered out of every
   merge, which is what keeps a deleted message deleted.
 - The depth engine is transform-only and rAF-throttled: scroll depth recomputes once
-  per frame, parallax writes CSS custom properties, and nothing touches layout.
+  per frame, parallax writes CSS custom properties, and nothing touches layout. Bubble
+  geometry is measured once per render (not per frame), and the per-bubble change check
+  is an integer compare.
 - Bubbles, avatars and all colour are original CSS — no Apple assets are bundled.
   This is a design study, not an Apple product, and is not affiliated with Apple Inc.
 
