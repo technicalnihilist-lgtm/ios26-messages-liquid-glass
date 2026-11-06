@@ -478,6 +478,46 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('pressing a bubble does not flatten its depth for good', async () => {
+    const p = await open(browser, {
+      threads: [{ id: 11, addr: 'Aanya', snippet: 'hi', date: T938, unread: 0 }],
+      msgs: { Aanya: MSGS_AANYA }
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(600);
+    const before = await p.$$eval('#msgs .bub', els => els.map(e => e.style.getPropertyValue('--bz')));
+    const idx = before.reduce((best, v, i) => (parseFloat(v) > parseFloat(before[best]) ? i : best), 0);
+    assert(parseFloat(before[idx]) > 0, 'no bubble had depth to lose: ' + JSON.stringify(before));
+    const box = await p.$$eval('#msgs .bub', (els, i) => {
+      const r = els[i].getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, idx);
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(120);
+    await p.mouse.up();
+    await p.waitForTimeout(500);
+    const after = await p.$$eval('#msgs .bub', els => els.map(e => e.style.getPropertyValue('--bz')));
+    assert(parseFloat(after[idx]) > 0, 'the pressed bubble stayed flat: ' + JSON.stringify(after));
+    await p.context().close();
+  });
+
+  await test('a draft is not carried into the next conversation', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.fill('#txt', 'half-written');
+    await p.click('#back');
+    await p.waitForTimeout(600);
+    await p.click('#rows .row[data-i="1"]');
+    await p.waitForTimeout(600);
+    const v = await p.$eval('#txt', el => el.value);
+    assert(v === '', 'the draft from the last chat is still in the composer: ' + v);
+    const sent = await p.evaluate(() => window.__mockCalls('sendSms'));
+    assert(sent.length === 0, 'nothing should have been sent');
+    await p.context().close();
+  });
+
   await test('search filters the list', async () => {
     const p = await open(browser);
     await p.fill('#q', 'roh');

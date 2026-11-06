@@ -19,8 +19,12 @@ final class Notify {
     // both receivers can see the same text; never notify twice for one SMS
     private static String lastKey;
     private static long lastAt;
-    // creating a channel is idempotent but not free: do it once per process
-    private static boolean channelsMade;
+    // creating a channel is idempotent but not free: do it once per process.
+    // One flag per channel: a shared flag meant the second channel was never
+    // created, and posting to a channel that does not exist throws on O+ - so
+    // either the MMS or the SMS notification silently never appeared.
+    private static boolean msgChannelMade;
+    private static boolean mmsChannelMade;
 
     static void message(Context ctx, String from, String body) {
         try {
@@ -31,12 +35,12 @@ final class Notify {
             lastAt = now;
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !channelsMade) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !msgChannelMade) {
                 NotificationChannel ch = new NotificationChannel(MSG_CHANNEL, "Messages",
                         NotificationManager.IMPORTANCE_HIGH);
                 ch.enableVibration(true);
                 nm.createNotificationChannel(ch);
-                channelsMade = true;
+                msgChannelMade = true;
             }
 
             Intent open = new Intent(ctx, MainActivity.class);
@@ -45,7 +49,10 @@ final class Notify {
             open.setData(android.net.Uri.parse("smsto:" + from));
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
-            PendingIntent pi = PendingIntent.getActivity(ctx, 1, open, flags);
+            // one request code per conversation: a shared code made every
+            // notification reuse the last intent, so tapping an older one opened
+            // the wrong chat
+            PendingIntent pi = PendingIntent.getActivity(ctx, idFor(from), open, flags);
 
             Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? new Notification.Builder(ctx, MSG_CHANNEL)
@@ -81,11 +88,11 @@ final class Notify {
         try {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !channelsMade) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !mmsChannelMade) {
                 NotificationChannel ch = new NotificationChannel(MMS_CHANNEL, "Multimedia messages",
                         NotificationManager.IMPORTANCE_DEFAULT);
                 nm.createNotificationChannel(ch);
-                channelsMade = true;
+                mmsChannelMade = true;
             }
             Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? new Notification.Builder(ctx, MMS_CHANNEL)

@@ -192,7 +192,10 @@ function loadThreads(){if(!BR)return false;try{
  /* A conversation that exists only on this side (compose -> no provider id yet)
     has to survive a poll. Rebuilding T from the store alone dropped it, which
     left cur pointing at nothing and made the next Send silently do nothing. */
- const local=T.filter(t=>t.local&&!arr.some(a=>a.addr===t.addr));
+ /* the provider may hand back the same number written differently, so match on
+    the normalised address too - an exact compare kept the local copy as well and
+    the conversation showed up twice */
+ const local=T.filter(t=>t.local&&!arr.some(a=>a.addr===t.addr||(nrm(t.addr)!==''&&nrm(a.addr)===nrm(t.addr))));
  T.length=0;
  arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),d:t.date,u:t.unread>0,m:[{x:t.snippet||''}]}));
  local.forEach(t=>T.push(t));
@@ -213,13 +216,16 @@ function spring(el,from,mid,to,dur,fill){ // Web Animations bounce
  const a=el.animate([{transform:from,offset:0},{transform:mid[0],offset:.45},{transform:mid[1],offset:.7},{transform:mid[2],offset:.88},{transform:to,offset:1}],{duration:d,easing:'ease-out',fill:fill||'none'});return a}
 const up=1+.1*S.k;
 function sc(v){return `scale(${v})`}
-function openApp(){const a=$('#app');a.classList.add('on');const k=S.k;
+/* a close animation still in flight must not remove .on after a reopen: both
+   paths share one counter, and only the newest one is allowed to act */
+let appGen=0;
+function openApp(){appGen++;const a=$('#app');a.classList.add('on');const k=S.k;
  spring(a,sc(.25),[sc(1+.07*k),sc(1-.03*k),sc(1+.012*k)],sc(1),1000);a.animate([{opacity:0},{opacity:1}],{duration:200})}
-function closeApp(){const a=$('#app');const k=S.k;
+function closeApp(){const a=$('#app');const k=S.k;const gen=++appGen;
  if(!S.on){a.classList.remove('on');return}
  const d=(1.1-S.sp)*650*(0.7+k*.6);
  const an=a.animate([{transform:'scale(1)'},{transform:sc(1+.06*k),offset:.3},{transform:sc(.2),opacity:0}],{duration:d,easing:'ease-in'});
- done(an,()=>a.classList.remove('on'))}
+ done(an,()=>{if(gen===appGen)a.classList.remove('on')})}
 function pop(el){if(!S.on)return;const k=S.k;
  // keep the bubble's depth transform while it pops, otherwise it snaps flat mid-air
  const base='translate3d(0,var(--by,0px),var(--bz,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(var(--bs,1)) ';
@@ -251,12 +257,20 @@ function renderThread(keepScroll){const t=T[cur];if(!t)return;
  $('#msgs').innerHTML=out.join('');
  s.scrollTop=(keepScroll&&!wasBottom)?prevTop:s.scrollHeight;
  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
-function openThread(i){cur=i;T[i].u=false;loadMsgs(i);
+function openThread(i){const prev=cur;cur=i;T[i].u=false;
+ /* the composer is one field for every conversation: a draft left in the last
+    chat would otherwise be sent to whoever is opened next */
+ if(prev!==i)$('#txt').value='';
+ loadMsgs(i);
  if(BR&&(T[i].id||T[i].addr))try{BR.markRead(T[i].id||0,T[i].addr||'')}catch(e){}
- renderThread();slide($('#thread'),100);
- // the list has to move on the same curve as the thread it is making room for
- $('#list').style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;
- $('#list').style.transform='translateX(-25%)'}
+ renderThread();
+ /* the push transition belongs to list -> thread. Jumping from one open chat to
+    another (contacts sheet, sms: link) is not a push: re-running slide() threw
+    the thread off-screen and slid it back in for no reason. */
+ if(prev===null){slide($('#thread'),100);
+  // the list has to move on the same curve as the thread it is making room for
+  $('#list').style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;
+  $('#list').style.transform='translateX(-25%)'}}
 function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
 function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];if(!t)return;
  if(BR){
@@ -410,20 +424,25 @@ function depthReset(){
 function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
  const sw=$('#t3d');if(sw)sw.classList.toggle('on',D.on);
  const r5=$('#r5');if(r5)r5.disabled=!D.on;saveCfg()}
+/* one rAF for every parallax source: the pointer and the gyroscope both feed
+   this, so a sensor firing at 100Hz costs one transform pass per frame
+   instead of one per event */
+function queueParallax(nx,ny){
+ parQ=[nx,ny];if(parRaf)return;
+ parRaf=requestAnimationFrame(()=>{parRaf=0;const q=parQ;parQ=null;if(!q||!D.on)return;
+  parCache();applyParallax(q[0],q[1])});}
 // pointer / touch parallax over the whole phone
 document.addEventListener('pointermove',e=>{
  if(!D.on||e.pointerType==='touch')return;
- parQ=[e.clientX,e.clientY];if(parRaf)return;
- parRaf=requestAnimationFrame(()=>{parRaf=0;const q=parQ;parQ=null;if(!q)return;
-  parCache();
-  if(!parPhoneRect)parPhoneRect=parPhone.getBoundingClientRect();
-  const r=parPhoneRect;
-  applyParallax(clamp1(((q[0]-r.left)/r.width-.5)*2),clamp1(((q[1]-r.top)/r.height-.5)*2))});
+ parCache();
+ if(!parPhoneRect)parPhoneRect=parPhone.getBoundingClientRect();
+ const r=parPhoneRect;
+ queueParallax(clamp1(((e.clientX-r.left)/r.width-.5)*2),clamp1(((e.clientY-r.top)/r.height-.5)*2));
 },{passive:true});
 // device tilt = the 4th dimension (motion over time)
 window.addEventListener('deviceorientation',e=>{
  if(!D.on||e.gamma==null||e.beta==null)return;
- applyParallax(clamp1(e.gamma/32),clamp1((e.beta-45)/40));
+ queueParallax(clamp1(e.gamma/32),clamp1((e.beta-45)/40));
 },{passive:true});
 // tilt a bubble toward the finger
 function bubbleTilt(b,e){
@@ -442,11 +461,15 @@ function bubbleFlat(b){
  if(!b)return;
  b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');
  b.style.setProperty('--bz','0px');b.style.setProperty('--hl','0');
+ /* depthScroll skips bubbles whose cached signature still matches: after the
+    tilt pose is cleared by hand the cache has to be dropped too, or the bubble
+    stays flat until the scroll position changes */
+ b.__dk=null;
 }
 let tiltB=null,tiltQ=null,tiltRaf=0;
 function untilt(){const b=tiltB;tiltB=null;if(b)bubbleFlat(b);requestAnimationFrame(depthScroll)}
-document.addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('.bub');if(b){tiltB=b;bubbleTilt(b,e)}},{passive:true});
-document.addEventListener('pointermove',e=>{const b=e.target.closest&&e.target.closest('.bub');if(!b)return;
+document.addEventListener('pointerdown',e=>{if(!D.on)return;const b=e.target.closest&&e.target.closest('.bub');if(b){tiltB=b;bubbleTilt(b,e)}},{passive:true});
+document.addEventListener('pointermove',e=>{if(!D.on)return;const b=e.target.closest&&e.target.closest('.bub');if(!b)return;
  tiltB=b;tiltQ=[b,e.clientX,e.clientY];if(tiltRaf)return;
  tiltRaf=requestAnimationFrame(()=>{tiltRaf=0;const q=tiltQ;tiltQ=null;if(q)bubbleTilt(q[0],{clientX:q[1],clientY:q[2]})})},{passive:true});
 document.addEventListener('pointerup',untilt,{passive:true});
@@ -511,7 +534,11 @@ const X={b:null,g:null,i:-1};
 let deferRender=false;   // a poll asked for a re-render while the long-press menu was open
 function hideMenu(){const m=$('#ctx');if(!m.classList.contains('on'))return;if(!S.on){m.classList.remove('on');return}
  const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});done(a,()=>m.classList.remove('on'))}
-function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}if(X.b){X.b.style.visibility='';X.b=null}
+function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}
+ /* the anchor had its transition switched off while it was measured: put the
+    stylesheet's transition back, or that bubble/row stops animating smoothly
+    for the rest of the session */
+ if(X.b){X.b.style.visibility='';X.b.style.transition='';X.b=null}
  X.msg=null;X.th=null;X.k=null;X.i=-1;
  /* a poll that landed while the menu was open deliberately re-rendered nothing */
  if(deferRender){deferRender=false;if(cur!==null){loadMsgs(cur);renderThread(true)}}}

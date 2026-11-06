@@ -178,6 +178,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         pageLoaded = false;
+        poll.removeCallbacks(pollTask);
         if (smsChanged != null) {
             try { unregisterReceiver(smsChanged); } catch (Exception ignored) {}
         }
@@ -419,6 +420,9 @@ public class MainActivity extends Activity {
             Map<String, JSONObject> byAddr = new java.util.HashMap<>();
             for (JSONObject o : seen.values()) byAddr.put(LocalStore.norm(o.optString("addr")), o);
             JSONArray local = LocalStore.all(this);
+            // read_at used to be re-parsed from JSON for every stored message - up
+            // to 800 JSON parses on every 6s poll. Read the map once.
+            Map<String, Long> readAt = LocalStore.readMap(this);
             for (int i = 0; i < local.length(); i++) {
                 JSONObject m = local.optJSONObject(i);
                 if (m == null) continue;
@@ -427,7 +431,8 @@ public class MainActivity extends Activity {
                 if (LocalStore.isDeleted(this, addr, m.optString("body"), when)) continue;
                 // same person, possibly written as "+91 98765 43210" and "+919876543210"
                 JSONObject existing = byAddr.get(LocalStore.norm(addr));
-                boolean fresh = when > LocalStore.readAt(this, addr);
+                Long seenAt = readAt.get(addr);
+                boolean fresh = when > (seenAt == null ? 0L : seenAt);
                 if (existing == null) {
                     JSONObject o = new JSONObject();
                     o.put("id", LocalStore.syntheticThreadId(addr));
@@ -458,6 +463,11 @@ public class MainActivity extends Activity {
     }
 
     private String messagesJson(long threadId, String addr) {
+        // the tombstone check needs the address: a caller that only knows the
+        // thread id would otherwise get deleted messages merged back in
+        if ((addr == null || addr.isEmpty()) && threadId > 0) {
+            try { addr = addrForThread(threadId); } catch (Exception ignored) {}
+        }
         List<JSONObject> all = new ArrayList<>();
 
         if (threadId > 0) {
@@ -607,14 +617,20 @@ public class MainActivity extends Activity {
             // a conversation that only exists in our own store (or has no provider id yet)
             if (addr == null || addr.isEmpty()) return;
             try {
-                JSONArray local = LocalStore.forAddress(this, addr);
+                // match the way everything else matches: "+91 98765 43210" and
+                // "+919876543210" are the same conversation. An exact-address
+                // sweep left the other spelling behind, and the deleted chat
+                // came straight back on the next poll.
+                JSONArray local = LocalStore.forAddressLike(this, addr);
                 for (int i = 0; i < local.length(); i++) {
                     JSONObject m = local.optJSONObject(i);
                     if (m == null) continue;
-                    LocalStore.tombstone(this, addr, m.optString("body"), m.optLong("date"));
+                    String maddr = m.optString("addr");
+                    if (maddr.isEmpty()) maddr = addr;
+                    LocalStore.tombstone(this, maddr, m.optString("body"), m.optLong("date"));
                 }
             } catch (Exception ignored) {}
-            LocalStore.removeAddress(this, addr);
+            LocalStore.removeAddressLike(this, addr);
             return;
         }
         tombstoneThread(threadId, addr);
@@ -659,11 +675,13 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
         try {
-            JSONArray local = LocalStore.forAddress(this, addr);
+            JSONArray local = LocalStore.forAddressLike(this, addr);
             for (int i = 0; i < local.length(); i++) {
                 JSONObject m = local.optJSONObject(i);
                 if (m == null) continue;
-                LocalStore.tombstone(this, addr, m.optString("body"), m.optLong("date"));
+                String maddr = m.optString("addr");
+                if (maddr.isEmpty()) maddr = addr;
+                LocalStore.tombstone(this, maddr, m.optString("body"), m.optLong("date"));
             }
         } catch (Exception ignored) {}
     }

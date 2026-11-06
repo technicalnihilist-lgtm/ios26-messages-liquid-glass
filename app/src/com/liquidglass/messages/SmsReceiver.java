@@ -5,6 +5,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
 
@@ -42,7 +43,10 @@ public class SmsReceiver extends BroadcastReceiver {
         v.put(Telephony.Sms.DATE_SENT, when);
         v.put(Telephony.Sms.READ, 0);
         v.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX);
-        v.put(Telephony.Sms.SEEN, 0);
+        // the `seen` column only exists from Android 10: writing it on an older
+        // provider made every insert fail, so an incoming text never reached the
+        // system store (it only survived in our own backup copy)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) v.put(Telephony.Sms.SEEN, 0);
 
         Uri stored = null;
         try {

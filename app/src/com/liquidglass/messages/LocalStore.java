@@ -157,6 +157,23 @@ final class LocalStore {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * The whole read_at map in one parse. Callers that check hundreds of stored
+     * messages per poll were re-parsing this JSON once per message.
+     */
+    static synchronized Map<String, Long> readMap(Context ctx) {
+        Map<String, Long> out = new HashMap<>();
+        try {
+            JSONObject o = new JSONObject(prefs(ctx).getString(READ_AT, "{}"));
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                out.put(k, o.optLong(k, 0L));
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
     static synchronized long readAt(Context ctx, String addr) {
         if (addr == null || addr.isEmpty()) return 0L;
         try {
@@ -194,6 +211,24 @@ final class LocalStore {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.optJSONObject(i);
                 if (o != null && !addr.equals(o.optString("addr"))) keep.put(o);
+            }
+            p.edit().putString(KEY, keep.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    /** Same as removeAddress, but matches however the number was written. */
+    static synchronized void removeAddressLike(Context ctx, String addr) {
+        if (addr == null) return;
+        try {
+            SharedPreferences p = prefs(ctx);
+            JSONArray arr = new JSONArray(p.getString(KEY, "[]"));
+            JSONArray keep = new JSONArray();
+            String key = norm(addr);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String a = o.optString("addr");
+                if (!addr.equals(a) && !key.equals(norm(a))) keep.put(o);
             }
             p.edit().putString(KEY, keep.toString()).apply();
         } catch (Exception ignored) {}
