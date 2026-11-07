@@ -37,7 +37,11 @@ const BASE = {
 const results = [];
 let failures = 0;
 
+// ONLY=<substring> runs just the matching tests - handy when chasing one failure
+const ONLY = process.env.ONLY || '';
+
 async function test(name, fn) {
+  if (ONLY && name.indexOf(ONLY) < 0) return;
   try {
     await fn();
     results.push(['PASS', name]);
@@ -230,6 +234,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.waitForTimeout(600);
     await p.mouse.up();
     await p.waitForTimeout(400);
+    assert(await p.$eval('#ctx', el => el.classList.contains('on')), 'context menu did not open');
     await p.click('#ctx .ci[data-a="copy"]');
     await p.waitForTimeout(500);
     const calls = await p.evaluate(() => window.__mockCalls('copy'));
@@ -333,6 +338,86 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const txt = await p.$$eval('#msgs .bub', els => els.map(e => e.textContent.trim()));
     assert(txt.includes('while the menu is open'), 'deferred render never flushed: ' + JSON.stringify(txt));
     assert(await p.$$eval('#app > .bub', els => els.length) === 0, 'floating copy left behind');
+    await p.context().close();
+  });
+
+  console.log('\n— poll safety —');
+  await test('an unchanged poll keeps the open thread usable', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    const before = await p.evaluate(() => T[cur].m.length);
+    assert(before === 2, 'expected 2 messages before the poll, got ' + before);
+    // the 6s poll reloads the conversation list; rebuilding it replaced the open
+    // thread's messages with its one-line snippet, so the next long-press found
+    // no message under the finger and copy / delete silently stopped working
+    await p.evaluate(() => window.__onSmsPoll());
+    await p.waitForTimeout(250);
+    const after = await p.evaluate(() => T[cur].m.length);
+    assert(after === 2, 'the poll truncated the open thread to ' + after + ' message(s)');
+    await p.evaluate(() => openCtx(document.querySelectorAll('#msgs .bub')[1]));
+    await p.waitForTimeout(250);
+    const menuOpen = await p.evaluate(() => document.querySelector('#ctx').classList.contains('on'));
+    assert(menuOpen, 'long-press no longer opens the message menu after a poll');
+    await p.context().close();
+  });
+
+  await test('an unchanged poll does not rebuild the open thread', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.evaluate(() => { document.querySelector('#msgs .bub').__probe = 1; });
+    await p.evaluate(() => window.__onSmsPoll());
+    await p.waitForTimeout(250);
+    const kept = await p.evaluate(() => !!document.querySelector('#msgs .bub').__probe);
+    assert(kept, 'the thread was re-rendered even though nothing changed');
+    await p.context().close();
+  });
+
+  await test('an open chat survives the store re-spelling the number', async () => {
+    const p = await open(browser, { threads: [], msgs: {} });
+    await p.evaluate(() => newChat('+91 98765 43210'));
+    await p.waitForTimeout(300);
+    await p.evaluate(() => {
+      window.__mock.threads.push({ id: 77, addr: '+919876543210', snippet: 'hi', date: Date.now(), unread: 0 });
+      window.__mock.msgs['+919876543210'] = [{ id: 771, body: 'hi', date: Date.now(), out: 0 }];
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(300);
+    const cur = await p.evaluate(() => cur);
+    assert(cur !== null, 'the poll closed the open conversation');
+    const n = await p.evaluate(() => T.length);
+    assert(n === 1, 'the same conversation is listed twice, n=' + n);
+    await p.context().close();
+  });
+
+  await test('a contact whose number is written differently reuses the conversation', async () => {
+    const p = await open(browser, {
+      threads: [{ id: 9, addr: '+919876543210', snippet: 'yo', date: T938, unread: 0 }],
+      msgs: { '+919876543210': [{ id: 91, body: 'yo', date: T938, out: 0 }] },
+      contacts: [{ name: 'Aanya', number: '+91 98765 43210' }]
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.click('#plus');
+    await p.waitForTimeout(600);
+    await p.evaluate(() => document.querySelector('#clist .row').click());
+    await p.waitForTimeout(700);
+    const n = await p.evaluate(() => T.length);
+    assert(n === 1, 'the contact picker cloned the conversation, n=' + n);
+    await p.context().close();
+  });
+
+  await test('an sms: link whose number is written differently reuses the conversation', async () => {
+    const p = await open(browser, {
+      threads: [{ id: 9, addr: '+919876543210', snippet: 'yo', date: T938, unread: 0 }],
+      msgs: { '+919876543210': [{ id: 91, body: 'yo', date: T938, out: 0 }] },
+      contacts: []
+    });
+    await p.evaluate(() => window.__composeTo('+91 98765 43210'));
+    await p.waitForTimeout(500);
+    const n = await p.evaluate(() => T.length);
+    assert(n === 1, 'the sms: link cloned the conversation, n=' + n);
     await p.context().close();
   });
 

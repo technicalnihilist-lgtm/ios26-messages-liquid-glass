@@ -396,7 +396,14 @@ public class MainActivity extends Activity {
                 int scanned = 0;
                 while (c.moveToNext() && seen.size() < 300 && scanned++ < 5000) {
                     long threadId = c.getLong(1);
-                    if (seen.containsKey(threadId)) continue;
+                    boolean unreadRow = c.getInt(6) == 0;
+                    if (seen.containsKey(threadId)) {
+                        // only the newest row of a thread used to be inspected, so a
+                        // conversation whose latest text was read but which still had
+                        // unread older texts lost its unread dot
+                        if (unreadRow) seen.get(threadId).put("unread", 1);
+                        continue;
+                    }
                     String addr = c.getString(2);
                     if (addr == null || addr.isEmpty()) addr = "(unknown)";
                     JSONObject o = new JSONObject();
@@ -404,7 +411,7 @@ public class MainActivity extends Activity {
                     o.put("addr", addr);
                     o.put("snippet", c.getString(3) == null ? "" : c.getString(3));
                     o.put("date", c.getLong(4));
-                    o.put("unread", c.getInt(6) == 0 ? 1 : 0);
+                    o.put("unread", unreadRow ? 1 : 0);
                     seen.put(threadId, o);
                 }
             }

@@ -196,15 +196,24 @@ function loadThreads(){if(!BR)return false;try{
     the normalised address too - an exact compare kept the local copy as well and
     the conversation showed up twice */
  const local=T.filter(t=>t.local&&!arr.some(a=>a.addr===t.addr||(nrm(t.addr)!==''&&nrm(a.addr)===nrm(t.addr))));
+ const sig2=sig+'|L'+local.map(t=>t.addr).join(',');
+ /* Nothing changed: leave T untouched. Rebuilding it from the store replaced the
+    open thread's message array with its one-line snippet, so a long-press could
+    no longer find the bubble it was aimed at (copy / delete stopped opening) and
+    the next send drew the snippet back as a phantom received bubble. */
+ if(sig2===lastSig)return false;
+ lastSig=sig2;
  T.length=0;
  arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),d:t.date,u:t.unread>0,m:[{x:t.snippet||''}]}));
  local.forEach(t=>T.push(t));
- const sig2=sig+'|L'+local.map(t=>t.addr).join(',');
  if(cur!==null){let k=-1;
   if(openId&&openId>0)k=T.findIndex(x=>x.id===openId);
-  else if(openAddr)k=T.findIndex(x=>x.addr===openAddr);
+  /* the provider can hand the same conversation back with the number written
+     differently ("+91 98765 43210" vs "+919876543210"): an exact compare here
+     dropped cur and the open chat vanished on the next poll */
+  if(k<0&&openAddr)k=findThread(openAddr,0);
   cur=k>=0?k:null}
- if(sig2!==lastSig){lastSig=sig2;renderRows();return true}return false}catch(e){return false}}
+ renderRows();return true}catch(e){return false}}
 function loadMsgs(i){const t=T[i];if(!BR||!t)return;try{
  const arr=JSON.parse(BR.loadMessages(t.id||0,t.addr));
  t.m=arr.map(m=>({id:m.id,f:m.out?1:0,x:m.body,d:m.date}))}catch(e){}}
@@ -387,15 +396,19 @@ function depthGeo(bubs,sc){
    return{t:r.top-sr.top+sc.scrollTop,h:r.height}});
  geoN=bubs.length;
  return geo}
+let dscEl=null,dscKs=[];
 function depthScroll(){
  if(!D.on)return;
- const sc=$('#tscroll');if(!sc)return;
+ const sc=(dscEl&&dscEl.isConnected)?dscEl:(dscEl=$('#tscroll'));if(!sc)return;
  const bubs=bubList(),n=bubs.length;
  if(!n)return;
  const h=sc.clientHeight||1;
  const mid=h/2,top=sc.scrollTop;   // viewport centre, in scroll-content coordinates
  const s=D.strength*2;
- const ks=new Array(n),g=depthGeo(bubs,sc);
+ /* one reusable scratch array: this runs every scroll frame, and a fresh
+   Array(n) per frame was 300 allocations a frame on a long thread */
+ const ks=dscKs;if(ks.length<n)ks.length=n;
+ const g=depthGeo(bubs,sc);
  for(let i=0;i<n;i++){const q=g[i];
    ks[i]=q?Math.min(1,Math.abs(q.t+q.h/2-top-mid)/h*1.6):-1}
  /* a number beats a toFixed() string: this was two toFixed() calls per bubble
@@ -493,9 +506,11 @@ bind('#r3','#v3',v=>{S.k=v/10;ease();saveSoon()},v=>v+'/10');
 bind('#r4','#v4',v=>{S.sp=v/10;ease();saveSoon()},v=>v+'/10');
 $('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';
 $('#t3d').classList.toggle('on',D.on);
-bind('#r5','#v5',v=>{D.strength=v/10;saveCfg();depthScroll()},v=>v+'/10');
-bind('#r6','#v6',v=>{D.par=v/10;saveCfg();applyParallax(parX,parY)},v=>v+'/10');
-bind('#r7','#v7',v=>{D.tilt=v/10;saveCfg()},v=>v+'/10');
+/* dragging a slider fires an input event per pixel: writing all ten prefs on
+   each one meant dozens of SharedPreferences commits per drag */
+bind('#r5','#v5',v=>{D.strength=v/10;saveSoon();depthScroll()},v=>v+'/10');
+bind('#r6','#v6',v=>{D.par=v/10;saveSoon();applyParallax(parX,parY)},v=>v+'/10');
+bind('#r7','#v7',v=>{D.tilt=v/10;saveSoon()},v=>v+'/10');
 $('#t3d').onclick=function(){setDepth(!D.on)};
 $('#r5').disabled=!D.on;
 $('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
@@ -532,8 +547,12 @@ function splash(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02;
  for(let k=0;k<14;k++){const bt=t+.04+Math.pow(Math.random(),.8)*1.05;bubble(c,bt,500+Math.random()*1300,.05+Math.random()*.07,.3*(1-(bt-t)/1.4))}}
 const X={b:null,g:null,i:-1};
 let deferRender=false;   // a poll asked for a re-render while the long-press menu was open
+/* a hide still in flight must not remove .on from a menu that has been reopened
+   since: both paths share one counter and only the newest one may act */
+let ctxGen=0;
 function hideMenu(){const m=$('#ctx');if(!m.classList.contains('on'))return;if(!S.on){m.classList.remove('on');return}
- const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});done(a,()=>m.classList.remove('on'))}
+ const gen=++ctxGen;
+ const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});done(a,()=>{if(gen===ctxGen)m.classList.remove('on')})}
 function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}
  /* the anchor had its transition switched off while it was measured: put the
     stylesheet's transition back, or that bubble/row stops animating smoothly
@@ -558,7 +577,7 @@ function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected
  let left=me?r.right-A.left-W:r.left-A.left;left=Math.max(12,Math.min(A.width-W-12,left));
  let top=r.bottom-A.top+14,below=true;if(top+H>A.height-24){top=r.top-A.top-H-14;below=false}
  m.style.left=left+'px';m.style.top=top+'px';m.style.transformOrigin=(me?'100%':'0%')+' '+(below?'0%':'100%');
- m.classList.add('on');$('#scrim').classList.add('on');
+ ctxGen++;m.classList.add('on');$('#scrim').classList.add('on');
  m.animate([{opacity:0},{opacity:1}],{duration:120});
  spring(m,sc(.3),[sc(1+.1*S.k),sc(1-.04*S.k),sc(1+.015*S.k)],sc(1),700);
  try{if(navigator.vibrate)navigator.vibrate(15)}catch(e){}}
@@ -575,6 +594,10 @@ function doDelete(){if(!X.g)return;const g=X.g,b=X.b,snap=X.msg,th=X.th,ci=cur;X
   if(t&&snap){let k=-1;for(let j=0;j<t.m.length;j++){const m=t.m[j];
    if(snap.id?(m.id===snap.id):(m.x===snap.x&&Math.abs((m.d||0)-(snap.d||0))<2000)){k=j;break}}
    if(k>=0)t.m.splice(k,1)}
+  /* a poll that landed while the menu was open may have replaced the message
+     list with the thread snippet: reload before re-rendering, or the thread
+     collapses to a single bubble */
+  if(deferRender){deferRender=false;if(ci2>=0)loadMsgs(ci2)}
   if(cur===ci2){renderThread();$('#tscroll').scrollTop=sc0}renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
   const cs=getComputedStyle(b);done(b.animate([{height:b.offsetHeight+'px',marginTop:cs.marginTop,paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',marginTop:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:220,easing:'ease-out',fill:'forwards'}),finish)};
@@ -616,7 +639,7 @@ function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null||!T[i])retur
  const left=Math.max(12,Math.min(A.width-W-12,r.left-A.left+20));
  let top=r.bottom-A.top+10,below=true;if(top+H>A.height-24){top=r.top-A.top-H-10;below=false}
  m.style.left=left+'px';m.style.top=top+'px';m.style.transformOrigin='0% '+(below?'0%':'100%');
- m.classList.add('on');$('#scrim').classList.add('on');
+ ctxGen++;m.classList.add('on');$('#scrim').classList.add('on');
  m.animate([{opacity:0},{opacity:1}],{duration:120});
  spring(m,sc(.3),[sc(1+.1*S.k),sc(1-.04*S.k),sc(1+.015*S.k)],sc(1),700);
  try{if(navigator.vibrate)navigator.vibrate(15)}catch(e){}}
@@ -652,7 +675,10 @@ function openContacts(){if(!BR)return;$('#cq').value='';renderContacts('');
 $('#plus').onclick=()=>openContacts();
 $('#cq').oninput=function(){renderContacts(this.value)};
 $('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=r.dataset.num;if(!num)return;
- closeSheets();setTimeout(()=>{const k=T.findIndex(t=>t.addr===num);if(k>=0)openThread(k);else newChat(num)},300)};
+ /* newChat() resolves the address the same way the rest of the app does, so a
+    contact written "+91 98765 43210" opens the existing "+919876543210" chat
+    instead of cloning it */
+ closeSheets();setTimeout(()=>newChat(num),300)};
 window.__onContactsReady=function(){const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
 window.__onSmsPoll=function(){if(!BR)return;try{
  if(!loadThreads())return;
@@ -660,7 +686,7 @@ window.__onSmsPoll=function(){if(!BR)return;try{
 }catch(e){}};
 window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#defState');if(el)el.textContent=on?'On':'Not set'};
 window.__onSmsChanged=function(){loadThreads();if(cur!==null){loadMsgs(cur);renderThread(true)}renderRows();if(window.__onSmsStatus)window.__onSmsStatus()};
-window.__composeTo=function(addr){if(!addr)return;const k=T.findIndex(t=>t.addr===addr);
+window.__composeTo=function(addr){if(!addr)return;const k=findThread(addr,0);
  if(k>=0)openThread(k);else{openApp();newChat(addr)}};
 if(BR){$('#newName').placeholder='To: phone number';loadThreads();
  window.__onSmsStatus();

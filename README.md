@@ -37,7 +37,7 @@ No internet permission, no trackers, no libraries, ~70 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.8 (versionCode 13) |
+| Version | 2.9 (versionCode 14) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~70 KB |
@@ -161,11 +161,71 @@ node tests/screenshots.js         # re-renders screenshots/
 
 `ui-tests.js` covers boot, opening a thread, sending, delete + tombstones, the
 poll/receive path, HTML escaping, settings persistence, the default-SMS flow, the
-hardware-back chain and the 3D depth engine, and times a 300-message thread. Five of
+hardware-back chain and the 3D depth engine, and times a 300-message thread. Many of
 the checks are regressions from earlier releases: a poll must not drop a conversation
 you just composed, composing an existing number must not clone it, an incoming message
 must not rebuild the thread under an open long-press menu, pressing a bubble must not
-flatten its depth for good, and a draft must not follow you into the next chat.
+flatten its depth for good, a draft must not follow you into the next chat, an unchanged
+poll must leave the open thread (and its long-press menu) working, and a number the
+store writes differently must never close the open chat or clone it.
+
+`ONLY=<substring> node tests/ui-tests.js` runs just the matching tests.
+
+## What's new in 2.9 — the 6-second poll stops breaking the open chat
+
+**Fixed**
+
+- **Long-press stopped working in a chat you had left open.** Every poll rebuilt the
+  conversation list from the store, which replaced the open thread's message array with
+  its one-line snippet while the bubbles stayed on screen. The next long-press looked for
+  the message at that index, found nothing, and the copy/delete menu silently refused to
+  open. Sending in that state also drew the snippet back as a phantom received bubble
+  above your text. The list is now only rebuilt when the store actually changed.
+- **An open chat could close itself.** When the store handed the same conversation back
+  with the number written differently (`+91 98765 43210` vs `+919876543210`), re-pointing
+  the open thread used an exact address compare, failed, and dropped you back to the list
+  — where the next Send did nothing. It matches the number the way the rest of the app
+  does.
+- **Picking a contact (or arriving on an `sms:` link) cloned a conversation** whose
+  number is stored in another format. Both paths now resolve the address through the same
+  normalised lookup as compose.
+- **The unread dot could be missing on a conversation that had unread texts.** Only the
+  newest row of each thread was inspected, so a chat whose latest message you had read
+  but which still held unread older ones looked read. The flag now folds in every scanned
+  row of the thread.
+- **A repeated text could be swallowed.** The backup store treated an identical body from
+  the same sender within three minutes as a duplicate — texting "ok" twice in two minutes
+  kept only one copy. The window is now five seconds, which is all the two receivers
+  firing for a single SMS need.
+- **A menu could close the one that replaced it.** A hide animation still in flight
+  removed `.on` from a menu that had been reopened in the meantime; the open/close pair
+  now share a counter, like the app open/close pair already did.
+
+**Optimised**
+
+- **The poll no longer re-renders an unchanged thread.** `window.__onSmsPoll` reloaded and
+  re-rendered the open conversation every six seconds even when nothing had arrived — a
+  full `innerHTML` rebuild plus relayout of up to 300 bubbles, and it reset the depth
+  cache and any pop animation in flight. It now returns as soon as the store signature is
+  unchanged, and `loadThreads()` no longer throws away the open thread's messages on a
+  no-op poll.
+- **`depthScroll()` stopped allocating per frame.** It built a fresh `Array(n)` on every
+  scroll frame (300 allocations a frame on a long thread) and re-queried `#tscroll`; both
+  are reused now. Still 2.4–3.4 ms/frame over 300 bubbles.
+- **Dragging the depth sliders no longer hammers storage.** Each input event wrote all ten
+  preferences; the depth, parallax and tilt sliders now go through the existing 300 ms
+  debounce.
+- A 300-message thread still renders in 36–63 ms.
+
+**Reported, not patched** (each would change the approved design or needs your decision)
+
+- The bar/blob parallax transform string is still missing its closing parenthesis and the
+  blob transform is still overridden by the infinite drift animation, so neither the bars
+  nor the wallpaper move on tilt. Repairing it is a motion change, so it stays as
+  approved.
+- **The signing key is not in the repository** (`.gitignore` excludes `*.keystore`), so
+  this build is signed with a key generated during the build and will not install over
+  2.8 — uninstall first. See the note under *Download & install*.
 
 ## What's new in 2.8 — the draft stays put, the depth comes back
 

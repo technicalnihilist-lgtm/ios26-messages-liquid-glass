@@ -28,6 +28,14 @@ final class LocalStore {
     private static final int MAX = 800;
 
     /**
+     * Window in which a stored copy counts as "the same message we already have".
+     * Both receivers can fire for one SMS and stamp it with the same timestamp, so
+     * this only has to absorb that. It used to be three minutes, which silently
+     * swallowed a genuine repeat - texting "ok" twice in two minutes kept only one.
+     */
+    private static final long DUP_MS = 5000L;
+
+    /**
      * Tombstones indexed by address+body. Rebuilding this from JSON for every
      * message made loading a long thread quadratic; the index is built once and
      * thrown away whenever a new tombstone is written.
@@ -67,7 +75,7 @@ final class LocalStore {
                 if (addr.equals(o.optString("addr"))
                         && body.equals(o.optString("body"))
                         && o.optInt("out", 0) == out
-                        && Math.abs(when - o.optLong("date")) < 180000L) {
+                        && Math.abs(when - o.optLong("date")) < DUP_MS) {
                     return;
                 }
             }
