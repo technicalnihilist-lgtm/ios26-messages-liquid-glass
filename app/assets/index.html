@@ -241,8 +241,21 @@ function pop(el){if(!S.on)return;const k=S.k;
  el.animate([{transform:base+sc(.6)},{transform:base+sc(1+.12*k),offset:.55},{transform:base+sc(1-.04*k),offset:.8},{transform:base+sc(1)}],{duration:(1.1-S.sp)*520,easing:'ease-out'})}
 function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
-function renderRows(){const q=$('#q').value.toLowerCase();$('#rows').innerHTML=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
- return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>'}
+let rowsHtml='';
+function renderRows(){
+ /* a poll can land while a conversation's long-press menu is open. Rebuilding
+    #rows then replaced the very row the menu is anchored to: the floating copy
+    sat over a duplicate of itself and the tapped row stopped being the one under
+    the finger. Defer the rebuild, like the open thread already does. */
+ if(X.g&&X.k==='row'){deferRows=true;return}
+ deferRows=false;
+ const q=$('#q').value.toLowerCase();
+ const html=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
+ return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>';
+ /* the same markup is rebuilt on every poll and every keystroke: writing it back
+    threw away every row node and every animation on it for nothing */
+ if(html===rowsHtml)return;
+ rowsHtml=html;$('#rows').innerHTML=html}
 /* an empty conversation has no message to take a date from: use the thread's
    own date, not the clock, or the stamp changes every time the page opens */
 function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.d||Date.now(),d=new Date(ms),n=new Date();
@@ -251,6 +264,15 @@ function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.d||Date.now(),d=
  if(d.toDateString()===n.toDateString())day='Today';
  else{const y=new Date(n.getTime()-86400000);day=d.toDateString()===y.toDateString()?'Yesterday':d.toLocaleDateString(undefined,{weekday:'short'})}
  return `<div class="stamp"><b>${esc(day)}</b> ${hm}</div>`}
+/* what the open thread currently shows. A broadcast or a poll that changes
+   nothing used to rebuild every bubble in the conversation anyway. */
+let viewSig='';
+function threadSig(){const t=T[cur];if(!t)return'';
+ const m=t.m||[],n=m.length,a=n?m[n-1]:null;
+ return t.id+'|'+t.addr+'|'+t.c+'|'+t.n+'|'+t.t+'|'+n+'|'+(t.typing?1:0)+'|'+
+   (a?((a.id||0)+':'+(a.d||0)+':'+(a.f||0)+':'+String(a.x==null?'':a.x).length):'')}
+/* reload the open conversation and re-render only if it actually differs */
+function refreshThread(){if(cur===null)return;loadMsgs(cur);if(threadSig()!==viewSig)renderThread(true)}
 function renderThread(keepScroll){const t=T[cur];if(!t)return;
  /* rebuilding the list under an open long-press menu replaces the bubble the
     menu is anchored to: the copy then floats over a duplicate of itself */
@@ -264,14 +286,15 @@ function renderThread(keepScroll){const t=T[cur];if(!t)return;
  if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)out.push('<div class="dl">Delivered</div>');
  if(t.typing)out.push('<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>');
  $('#msgs').innerHTML=out.join('');
+ viewSig=threadSig();
  s.scrollTop=(keepScroll&&!wasBottom)?prevTop:s.scrollHeight;
  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
-function openThread(i){const prev=cur;cur=i;T[i].u=false;
+function openThread(i){const t0=T[i];if(!t0)return;const prev=cur;cur=i;t0.u=false;
  /* the composer is one field for every conversation: a draft left in the last
     chat would otherwise be sent to whoever is opened next */
  if(prev!==i)$('#txt').value='';
  loadMsgs(i);
- if(BR&&(T[i].id||T[i].addr))try{BR.markRead(T[i].id||0,T[i].addr||'')}catch(e){}
+ if(BR&&(t0.id||t0.addr))try{BR.markRead(t0.id||0,t0.addr||'')}catch(e){}
  renderThread();
  /* the push transition belongs to list -> thread. Jumping from one open chat to
     another (contacts sheet, sms: link) is not a push: re-running slide() threw
@@ -287,7 +310,7 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
   t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
   const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
   try{BR.sendSms(t.addr,v)}catch(e){}
-  setTimeout(()=>{loadThreads();if(cur!==null){loadMsgs(cur);renderThread(true)}renderRows()},900);
+  setTimeout(()=>{loadThreads();refreshThread();renderRows()},900);
   return}
  t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
  const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
@@ -329,7 +352,12 @@ $('#startChat').onclick=()=>startChat();
 function startChat(){const n=$('#newName').value.trim();if(!n)return;$('#newName').blur();closeSheets();setTimeout(()=>newChat(n),280)}
 /* one conversation per address: "+91 98765 43210" and "+919876543210" are the
    same person, so a composed number must open the existing thread, not clone it */
-function nrm(a){return String(a==null?'':a).replace(/[^0-9A-Za-z]/g,'').toLowerCase()}
+function nrm(a){let s=String(a==null?'':a).replace(/[^0-9A-Za-z]/g,'').toLowerCase();
+ /* the native store drops the Indian country code before comparing, so a chat
+    with "+919876543210" and a composed "9876543210" are one conversation here
+    too - they used to become two rows, one of them local-only */
+ if(s.length===12&&s.charCodeAt(0)===57&&s.charCodeAt(1)===49)s=s.slice(2);
+ return s}
 function findThread(addr,id){let k=-1;
  if(id&&id>0)k=T.findIndex(t=>t.id===id);
  if(k<0){const n=nrm(addr);k=T.findIndex(t=>t.addr===addr||(n!==''&&nrm(t.addr)===n))}
@@ -351,8 +379,11 @@ function saveCfg(){if(noSave)return;try{prefSet('ga',$('#r1').value);prefSet('bl
  prefSet('d3',D.on?1:0);prefSet('depth',$('#r5').value);
  prefSet('par',$('#r6').value);prefSet('tilt',$('#r7').value)}catch(e){}}
 function applyTheme(t){R.dataset.theme=t==='dark'?'dark':'light';const b=$('#td');if(b)b.classList.toggle('on',t==='dark')}
-$('#r1').value=prefGet('ga',28);$('#r2').value=prefGet('blur',22);
-$('#r3').value=prefGet('k',6);$('#r4').value=prefGet('sp',5);
+/* a pref that is not a number (hand-edited store, a half-written value) used to
+   turn the depth maths into NaN and push every bubble to "NaNpx" */
+function numPref(k,d){const v=+prefGet(k,d);return isFinite(v)?v:d}
+$('#r1').value=numPref('ga',28);$('#r2').value=numPref('blur',22);
+$('#r3').value=numPref('k',6);$('#r4').value=numPref('sp',5);
 S.on=prefGet('bounce','1')==='1';
 applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 // ================= 3D / 4D depth engine =================
@@ -360,9 +391,16 @@ const D={on:true,strength:.5,par:.5,tilt:.6};
 const clamp1=v=>Math.max(-1,Math.min(1,v));
 let parX=0,parY=0,raf=null,parRaf=0,parQ=null;
 let parBlobs=null,parBars=null,parPhone=null,parPhoneRect=null;
+/* Both writes below are dead as the design stands (see the note under this
+   function), and a style write the cascade throws away still dirties style on
+   every parallax frame. Decide once, at cache time, which of the two can ever
+   apply, and skip the rest. */
+let parBlobLive=1,barShiftOk=1;
 function parCache(){if(parBlobs)return;parBlobs=[...document.querySelectorAll('.blob')];
  parBars=[document.querySelector('#thread .bar'),document.querySelector('#list .bar')];
- parPhone=document.querySelector('.phone')}
+ parPhone=document.querySelector('.phone');
+ parBlobLive=parBlobs.length&&parBlobs.every(b=>{const a=getComputedStyle(b).animationName;return !a||a==='none'})?1:0;
+ try{barShiftOk=(window.CSS&&CSS.supports&&CSS.supports('transform','translate3d(1px,1px,0'))?1:0}catch(e){barShiftOk=1}}
 addEventListener('resize',()=>{parPhoneRect=null;geoReset()},{passive:true});
 // NOTE: the bar/blob parallax below is written exactly as it was approved. The bar
 // string is missing its closing paren and the blob transform is overridden by the
@@ -372,9 +410,10 @@ addEventListener('resize',()=>{parPhoneRect=null;geoReset()},{passive:true});
 function applyParallax(nx,ny){
  parX=nx;parY=ny;parCache();
  const amt=[30,48,22];
- parBlobs.forEach((b,i)=>{
+ if(parBlobLive)parBlobs.forEach((b,i)=>{
    const d=amt[i%amt.length]*D.par*2;
    b.style.transform=`translate3d(${(-nx*d).toFixed(1)}px,${(-ny*d).toFixed(1)}px,0)`});
+ if(!barShiftOk)return;
  const shift=(9*D.par*2);
  parBars.forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0`});
 }
@@ -496,9 +535,9 @@ document.addEventListener('scroll',e=>{
  if(t&&t.id==='tscroll'&&!raf){raf=requestAnimationFrame(()=>{depthScroll();raf=null})}
 },true);
 // restore 3D settings (D is defined just above)
-$('#r5').value=prefGet('depth',5);$('#r6').value=prefGet('par',5);$('#r7').value=prefGet('tilt',6);
-D.on=prefGet('d3','1')==='1';D.strength=Math.max(0,Math.min(1,(+prefGet('depth',5))/10));
-D.par=Math.max(0,Math.min(1,(+prefGet('par',5))/10));D.tilt=Math.max(0,Math.min(1,(+prefGet('tilt',6))/10));
+$('#r5').value=numPref('depth',5);$('#r6').value=numPref('par',5);$('#r7').value=numPref('tilt',6);
+D.on=prefGet('d3','1')==='1';D.strength=Math.max(0,Math.min(1,numPref('depth',5)/10));
+D.par=Math.max(0,Math.min(1,numPref('par',5)/10));D.tilt=Math.max(0,Math.min(1,numPref('tilt',6)/10));
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
 bind('#r1','#v1',v=>{R.style.setProperty('--ga',v/100);saveSoon()},v=>v+'%');
 bind('#r2','#v2',v=>{R.style.setProperty('--blur',v+'px');saveSoon()},v=>v+'px');
@@ -547,6 +586,7 @@ function splash(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02;
  for(let k=0;k<14;k++){const bt=t+.04+Math.pow(Math.random(),.8)*1.05;bubble(c,bt,500+Math.random()*1300,.05+Math.random()*.07,.3*(1-(bt-t)/1.4))}}
 const X={b:null,g:null,i:-1};
 let deferRender=false;   // a poll asked for a re-render while the long-press menu was open
+let deferRows=false;     // ... and the same for the conversation list
 /* a hide still in flight must not remove .on from a menu that has been reopened
    since: both paths share one counter and only the newest one may act */
 let ctxGen=0;
@@ -560,7 +600,9 @@ function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}
  if(X.b){X.b.style.visibility='';X.b.style.transition='';X.b=null}
  X.msg=null;X.th=null;X.k=null;X.i=-1;
  /* a poll that landed while the menu was open deliberately re-rendered nothing */
- if(deferRender){deferRender=false;if(cur!==null){loadMsgs(cur);renderThread(true)}}}
+ if(deferRender){deferRender=false;if(cur!==null){loadMsgs(cur);renderThread(true)}}
+ /* the row menu is closed now, so the deferred list rebuild may run */
+ if(deferRows)renderRows()}
 function openCtx(b){const i=+b.dataset.i;if(cur===null||isNaN(i)||!b.isConnected)return;closeCtx();
  if(!b.isConnected)return;   // closeCtx may have flushed a deferred re-render
  const th=T[cur],mm=th&&th.m[i]?th.m[i]:null;if(!th||!mm)return;
@@ -628,6 +670,7 @@ function splashSoft(){const c=actx();if(!c||!MG)return;const t=c.currentTime+.02
  n.connect(bp);bp.connect(ng);ng.connect(MG);n.start(t);n.stop(t+.4);
  bubble(c,t,320,.14,.32);for(let k=0;k<5;k++){bubble(c,t+.08+Math.random()*.45,600+Math.random()*1100,.05+Math.random()*.05,.16)}}
 function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null||!T[i])return;closeCtx();
+ if(!b.isConnected)return;   // closeCtx may have flushed a deferred list rebuild
  X.th={id:T[i].id,addr:T[i].addr};
  b.style.transition='none';b.style.transform='';
  const A=$('#app').getBoundingClientRect(),r=b.getBoundingClientRect(),g=b.cloneNode(true);
@@ -643,11 +686,13 @@ function openRowCtx(b){const i=+b.dataset.i;if(isNaN(i)||cur!==null||!T[i])retur
  m.animate([{opacity:0},{opacity:1}],{duration:120});
  spring(m,sc(.3),[sc(1+.1*S.k),sc(1-.04*S.k),sc(1+.015*S.k)],sc(1),700);
  try{if(navigator.vibrate)navigator.vibrate(15)}catch(e){}}
-function doRowDelete(){if(!X.g||X.k!=='row')return;const g=X.g,b=X.b,th=X.th||{},i=X.i;X.g=null;X.b=null;X.th=null;hideMenu();$('#scrim').classList.remove('on');
+function doRowDelete(){if(!X.g||X.k!=='row')return;const g=X.g,b=X.b,th=X.th||{};X.g=null;X.b=null;X.th=null;hideMenu();$('#scrim').classList.remove('on');
  splashSoft();const r=g.getBoundingClientRect(),A=$('#app').getBoundingClientRect();drops(r.left-A.left+r.width/2,r.top-A.top+r.height/2);
  const finish=()=>{if(BR&&(th.id||th.addr))try{BR.deleteThread(th.id||0,th.addr||'')}catch(e){}
-  let k=-1;for(let j=0;j<T.length;j++){const t=T[j];if(th.id?(t.id===th.id):(t.addr===th.addr)){k=j;break}}
-  if(k<0&&T[i]&&T[i].id===th.id)k=i;if(k>=0)T.splice(k,1);renderRows()};
+  /* resolve the row the way the rest of the app does: a store that re-spelled
+     the number would otherwise leave the deleted row on screen */
+  const k=findThread(th.addr||'',th.id||0);
+  if(k>=0)T.splice(k,1);renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
   const cs=getComputedStyle(b);b.style.overflow='hidden';done(b.animate([{height:b.offsetHeight+'px',paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:260,easing:'ease-out',fill:'forwards'}),finish)};
  const a=g.animate([{transform:'scale(1.03)',opacity:1},{transform:'scale(1.1)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-4deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(6deg)',opacity:0}],{duration:S.on?460:200,easing:'ease-in',fill:'forwards'});
@@ -682,10 +727,15 @@ $('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=
 window.__onContactsReady=function(){const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
 window.__onSmsPoll=function(){if(!BR)return;try{
  if(!loadThreads())return;
- if(cur!==null){loadMsgs(cur);renderThread(true)}
+ refreshThread()
 }catch(e){}};
 window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#defState');if(el)el.textContent=on?'On':'Not set'};
-window.__onSmsChanged=function(){loadThreads();if(cur!==null){loadMsgs(cur);renderThread(true)}renderRows();if(window.__onSmsStatus)window.__onSmsStatus()};
+/* this fires for every SMS broadcast - our own role grant, an MMS notice, a text
+   in a conversation you are not looking at. It re-rendered the open thread and
+   the whole list unconditionally; loadThreads() already repaints the list when
+   the store changed, and the thread now only repaints when it really differs */
+window.__onSmsChanged=function(){try{loadThreads();refreshThread()}catch(e){}
+ if(window.__onSmsStatus)window.__onSmsStatus()};
 window.__composeTo=function(addr){if(!addr)return;const k=findThread(addr,0);
  if(k>=0)openThread(k);else{openApp();newChat(addr)}};
 if(BR){$('#newName').placeholder='To: phone number';loadThreads();

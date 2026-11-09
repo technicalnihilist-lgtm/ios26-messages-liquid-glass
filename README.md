@@ -37,7 +37,7 @@ No internet permission, no trackers, no libraries, ~70 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.9 (versionCode 14) |
+| Version | 2.10 (versionCode 15) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~70 KB |
@@ -155,7 +155,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 31 behavioural checks
+node tests/ui-tests.js            # 39 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -166,10 +166,67 @@ the checks are regressions from earlier releases: a poll must not drop a convers
 you just composed, composing an existing number must not clone it, an incoming message
 must not rebuild the thread under an open long-press menu, pressing a bubble must not
 flatten its depth for good, a draft must not follow you into the next chat, an unchanged
-poll must leave the open thread (and its long-press menu) working, and a number the
-store writes differently must never close the open chat or clone it.
+poll must leave the open thread (and its long-press menu) working, a broadcast that
+changes nothing must repaint nothing, an incoming text must not rebuild the list under
+an open conversation menu, and a number the store writes differently — with or without
+its country code — must never close the open chat or clone it.
 
 `ONLY=<substring> node tests/ui-tests.js` runs just the matching tests.
+
+## What's new in 2.10 — the list stops moving under your finger
+
+**Fixed**
+
+- **The conversation list rebuilt itself under an open long-press menu.** A poll or an
+  incoming text that landed while a conversation's menu was open re-wrote `#rows`, which
+  replaced the very row the menu was anchored to: its floating copy then sat over a
+  duplicate of itself, and the row that had been pressed was no longer in the list. The
+  rebuild is deferred until the menu closes, the way the open thread already was, and a
+  delete now resolves its row through the same normalised lookup as everything else
+  instead of an exact address compare.
+- **Every SMS broadcast rebuilt the open chat and the whole list, changed or not.**
+  `__onSmsChanged` fires for a role grant, an MMS notice and a text in a conversation you
+  are not even looking at. Each one re-rendered up to 300 bubbles, reset the depth cache,
+  killed any pop animation in flight and threw away every row node. It now repaints the
+  thread only when its contents actually differ and lets `loadThreads()` decide about the
+  list.
+- **Composing a bare number cloned a contact stored with its country code.** Typing
+  `9876543210` for a chat the store holds as `+919876543210` created a second,
+  local-only conversation. The page now drops the Indian country code before comparing,
+  exactly like the native store already did.
+- **A deleted text could come back as a conversation's snippet.** The thread list never
+  consulted the tombstone store, so a delete the provider refused (no default-SMS role)
+  reappeared in the list on the next poll with the deleted text under the name. The list
+  now skips tombstoned rows and falls back to the previous live message.
+- **A damaged preference could flatten the whole 3D scene.** A stored value that was not
+  a number turned the depth maths into `NaN` and pushed every bubble to `"NaNpx"`. Slider
+  values are read through a guarded parse.
+- **A stale row index could throw.** `openThread()` now checks the conversation still
+  exists before writing to it.
+
+**Optimised**
+
+- **The parallax stopped writing styles the cascade throws away.** The wallpaper blobs are
+  driven by the infinite `drift` animation, which overrides any inline transform, and the
+  bar transform string is invalid — two dead style writes per parallax frame, on every
+  pointer move and every gyroscope sample. Both are now detected once and skipped. Motion
+  is unchanged (they never applied); the work is gone.
+- **The list is only re-written when its markup changes**, instead of on every poll and
+  every keystroke in the search field.
+- **The refresh after a send re-renders only if the conversation changed**, rather than
+  rebuilding the whole thread 900 ms after every message.
+
+**Reported, not patched** (each would change the approved design or needs your decision)
+
+- The bar/blob parallax transform string is still missing its closing parenthesis, so the
+  bars still do not slide on tilt. Repairing it is a motion change; it stays as approved.
+  The 2.10 change above only stops paying for the write.
+- **`will-change:transform` is still on every bubble.** On a 300-message thread that asks
+  the WebView for 300 compositor layers; dropping it would cut GPU memory but could change
+  how the 3D depth repaints on a low-end phone, so it needs your sign-off.
+- **The signing key is not in the repository** (`.gitignore` excludes `*.keystore`), so
+  this build is signed with a key generated during the build and will not install over
+  2.9 — uninstall first. See the note under *Download & install*.
 
 ## What's new in 2.9 — the 6-second poll stops breaking the open chat
 

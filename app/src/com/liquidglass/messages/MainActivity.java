@@ -405,12 +405,20 @@ public class MainActivity extends Activity {
                         continue;
                     }
                     String addr = c.getString(2);
+                    String body = c.getString(3) == null ? "" : c.getString(3);
+                    long when = c.getLong(4);
+                    // a text the user deleted is not this conversation's newest
+                    // message any more. Rows are newest first, so skipping it lets
+                    // the next live row stand for the thread; without this a delete
+                    // the provider refused (no default-SMS role) came straight back
+                    // as the conversation's snippet on the next poll.
+                    if (LocalStore.isDeleted(this, addr, body, when)) continue;
                     if (addr == null || addr.isEmpty()) addr = "(unknown)";
                     JSONObject o = new JSONObject();
                     o.put("id", threadId);
                     o.put("addr", addr);
-                    o.put("snippet", c.getString(3) == null ? "" : c.getString(3));
-                    o.put("date", c.getLong(4));
+                    o.put("snippet", body);
+                    o.put("date", when);
                     o.put("unread", unreadRow ? 1 : 0);
                     seen.put(threadId, o);
                 }

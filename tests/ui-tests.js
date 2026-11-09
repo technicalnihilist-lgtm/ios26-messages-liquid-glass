@@ -374,6 +374,87 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('a broadcast that changes nothing rebuilds neither thread nor list', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    // __onSmsChanged fires for every SMS broadcast - a role grant, an MMS notice,
+    // a text in a conversation you are not looking at. It used to rebuild the open
+    // thread (up to 300 bubbles) and the whole list regardless.
+    await p.evaluate(() => {
+      document.querySelector('#msgs .bub').__probe = 1;
+      document.querySelector('#rows .row').__probe = 1;
+    });
+    await p.evaluate(() => window.__onSmsChanged());
+    await p.waitForTimeout(300);
+    assert(await p.evaluate(() => !!document.querySelector('#msgs .bub').__probe),
+      'the open thread was rebuilt for a no-op broadcast');
+    assert(await p.evaluate(() => !!document.querySelector('#rows .row').__probe),
+      'the conversation list was rebuilt for a no-op broadcast');
+    await p.evaluate(() => {
+      window.__mockPush('Aanya', 'a real one', 0);
+      const t = window.__mock.threads.find(x => x.addr === 'Aanya');
+      t.snippet = 'a real one'; t.date = Date.now();
+      window.__onSmsChanged();
+    });
+    await p.waitForTimeout(400);
+    const txt = await p.$$eval('#msgs .bub', els => els.map(e => e.textContent.trim()));
+    assert(txt.includes('a real one'), 'a real change never reached the thread: ' + JSON.stringify(txt));
+    await p.context().close();
+  });
+
+  await test('an incoming message does not rebuild the list under an open row menu', async () => {
+    const p = await open(browser);
+    const box = await p.$eval('#rows .row[data-i="0"]', el => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(600);
+    await p.mouse.up();
+    await p.waitForTimeout(400);
+    assert(await p.$eval('#ctx', el => el.classList.contains('on')), 'row menu did not open');
+    await p.evaluate(() => {
+      window.__mockPush('Mom', 'while the row menu is open', 0);
+      const t = window.__mock.threads.find(x => x.addr === 'Mom');
+      t.snippet = 'while the row menu is open'; t.date = Date.now();
+      window.__onSmsChanged();
+    });
+    await p.waitForTimeout(400);
+    const state = await p.evaluate(() => [
+      document.querySelectorAll('#rows .row').length,
+      [...document.querySelectorAll('#rows .row')].filter(r => getComputedStyle(r).visibility === 'hidden').length,
+      document.querySelectorAll('#app > .row').length
+    ]);
+    assert(state[0] === 3, 'the list was rebuilt under the open menu, rows=' + state[0]);
+    assert(state[1] === 1, 'the row the menu is anchored to was replaced, hidden=' + state[1]);
+    assert(state[2] === 1, 'the floating copy of the row is gone');
+    await p.click('#scrim', { position: { x: 12, y: 420 } });
+    await p.waitForTimeout(700);
+    assert(await p.$$eval('#app > .row', els => els.length) === 0, 'floating row left behind');
+    const snip = await p.$$eval('#rows .rt p', els => els.map(e => e.textContent));
+    assert(snip.includes('while the row menu is open'),
+      'the deferred list rebuild never ran: ' + JSON.stringify(snip));
+    await p.context().close();
+  });
+
+  await test('composing a bare number reuses the +91 conversation', async () => {
+    const p = await open(browser, {
+      threads: [{ id: 9, addr: '+919876543210', snippet: 'yo', date: T938, unread: 0 }],
+      msgs: { '+919876543210': [{ id: 91, body: 'yo', date: T938, out: 0 }] },
+      contacts: []
+    });
+    // the native store already treats "9876543210" and "+919876543210" as the
+    // same person; the page used to open a second, local-only conversation
+    await p.evaluate(() => window.__composeTo('9876543210'));
+    await p.waitForTimeout(500);
+    const n = await p.evaluate(() => T.length);
+    assert(n === 1, 'the same person is listed twice, n=' + n);
+    assert(await p.evaluate(() => cur) === 0, 'the existing conversation was not opened');
+    await p.context().close();
+  });
+
   await test('an open chat survives the store re-spelling the number', async () => {
     const p = await open(browser, { threads: [], msgs: {} });
     await p.evaluate(() => newChat('+91 98765 43210'));
