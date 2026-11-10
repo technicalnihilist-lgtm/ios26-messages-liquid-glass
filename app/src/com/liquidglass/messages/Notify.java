@@ -94,12 +94,19 @@ final class Notify {
                 nm.createNotificationChannel(ch);
                 mmsChannelMade = true;
             }
+            // without a content intent a tap on this notification did nothing at all
+            Intent open = new Intent(ctx, MainActivity.class);
+            open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+
             Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? new Notification.Builder(ctx, MMS_CHANNEL)
                     : new Notification.Builder(ctx);
             b.setContentTitle("New MMS received")
              .setContentText("This build does not download MMS yet.")
              .setSmallIcon(android.R.drawable.ic_dialog_email)
+             .setContentIntent(PendingIntent.getActivity(ctx, 4201, open, flags))
              .setAutoCancel(true);
             nm.notify(4201, b.build());
         } catch (Exception ignored) {}

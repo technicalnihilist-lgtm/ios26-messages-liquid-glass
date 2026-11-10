@@ -309,7 +309,14 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
   if(!BR.hasSmsPermission()){BR.requestSmsPermission();return}
   t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
   const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
-  try{BR.sendSms(t.addr,v)}catch(e){}
+  /* a refused send (no radio, invalid address, provider exception) returned
+     false and we kept the bubble anyway: the text looked delivered, it had
+     been cleared from the field, and there was no way to send it again */
+  let sent=false;try{sent=BR.sendSms(t.addr,v)!==false}catch(e){sent=false}
+  if(!sent){
+   for(let i=t.m.length-1;i>=0;i--){if(t.m[i].f&&t.m[i].x===v){t.m.splice(i,1);break}}
+   if(!$('#txt').value)$('#txt').value=v;
+   renderThread();return}
   setTimeout(()=>{loadThreads();refreshThread();renderRows()},900);
   return}
  t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
@@ -708,13 +715,20 @@ RW.addEventListener('touchend',lpCancel);
 RW.addEventListener('contextmenu',e=>{e.preventDefault();const r=okRow(e);if(r&&!X.g){lpCancel();openAny(r)}});
 $('#setDefault').onclick=()=>{if(!BR)return;closeSheets();BR.requestSmsPermission();setTimeout(()=>BR.requestDefaultSms(),700)};
 $('#askDefault').onclick=()=>{if(!BR)return;BR.requestSmsPermission();setTimeout(()=>BR.requestDefaultSms(),700)};
-function renderContacts(q){if(!BR)return;let arr=[];
- try{arr=JSON.parse(BR.loadContacts()||'[]')}catch(e){}
- if(!arr||!arr.length){$('#clist').innerHTML='<p class="perm">Contacts access is off. Allow it, or tap the compose button and type a number.</p>';return}
+/* the contact list is fetched once per sheet open. Filtering used to call
+   loadContacts() again on every keystroke, and that is a full ContactsContract
+   query (up to 1000 rows, every phone number) run on the bridge thread for each
+   letter typed into the search field. */
+let contactsCache=null;
+function contactsList(){if(contactsCache)return contactsCache;
+ let arr=[];try{arr=JSON.parse(BR.loadContacts()||'[]')}catch(e){}
+ contactsCache=Array.isArray(arr)?arr:[];return contactsCache}
+function renderContacts(q){if(!BR)return;const arr=contactsList();
+ if(!arr.length){$('#clist').innerHTML='<p class="perm">Contacts access is off. Allow it, or tap the compose button and type a number.</p>';return}
  const f=(q||'').toLowerCase().trim();
  const list=arr.filter(c=>!f||(c.name||'').toLowerCase().includes(f)||(c.number||'').includes(f)).slice(0,200);
  $('#clist').innerHTML=list.map(c=>{const nm=c.name||c.number||'';return `<div class="row cont" data-num="${esc(String(c.number||''))}"><div class="av" style="background:${colorFor(nm)};width:40px;height:40px;font-size:17px">${esc(ini(nm))}</div><div class="rt"><b>${esc(nm)}<small style="font-weight:400;font-size:13px">${esc(c.number||'')}</small></b></div></div>`}).join('')||'<p class="perm">No contact matches that.</p>'}
-function openContacts(){if(!BR)return;$('#cq').value='';renderContacts('');
+function openContacts(){if(!BR)return;contactsCache=null;$('#cq').value='';renderContacts('');
  if(!BR.hasContactsPermission()){try{BR.requestContactsPermission()}catch(e){}}
  sheet('#sContacts');setTimeout(()=>renderContacts(''),400)}
 $('#plus').onclick=()=>openContacts();
@@ -724,7 +738,7 @@ $('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=
     contact written "+91 98765 43210" opens the existing "+919876543210" chat
     instead of cloning it */
  closeSheets();setTimeout(()=>newChat(num),300)};
-window.__onContactsReady=function(){const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
+window.__onContactsReady=function(){contactsCache=null;const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
 window.__onSmsPoll=function(){if(!BR)return;try{
  if(!loadThreads())return;
  refreshThread()
@@ -736,8 +750,15 @@ window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#
    the store changed, and the thread now only repaints when it really differs */
 window.__onSmsChanged=function(){try{loadThreads();refreshThread()}catch(e){}
  if(window.__onSmsStatus)window.__onSmsStatus()};
-window.__composeTo=function(addr){if(!addr)return;const k=findThread(addr,0);
- if(k>=0)openThread(k);else{openApp();newChat(addr)}};
+window.__composeTo=function(addr){if(!addr)return;
+ /* this is the notification tap and the sms: link. It arrives while our own
+    settings sheet, a long-press menu or the whole app can still be closed, and
+    openThread() only slides the thread in: the chat used to open behind the
+    springboard (app not shown at all) or behind a sheet nobody dismissed. */
+ try{if(X.g)closeCtx();if(document.querySelector('.sheet.on'))closeSheets()}catch(e){}
+ if(!$('#app').classList.contains('on'))openApp();
+ const k=findThread(addr,0);
+ if(k>=0)openThread(k);else newChat(addr)};
 if(BR){$('#newName').placeholder='To: phone number';loadThreads();
  window.__onSmsStatus();
  setTimeout(()=>{if(!BR.isDefaultSms()&&cur===null&&!document.querySelector('.sheet.on'))sheet('#sDefault')},1100)}

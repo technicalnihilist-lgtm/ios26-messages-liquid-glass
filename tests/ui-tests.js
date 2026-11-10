@@ -502,6 +502,68 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('a notification tap opens the chat even when the app was closed', async () => {
+    const p = await open(browser);
+    await p.evaluate(() => closeApp());
+    await p.waitForTimeout(900);
+    assert(!(await p.$eval('#app', el => el.classList.contains('on'))), 'the app was still open');
+    // tapping a notification (or an sms: link) for a conversation that already
+    // exists only slid the thread in: the app itself stayed closed, so the user
+    // was left looking at the springboard with the chat open behind it
+    await p.evaluate(() => window.__composeTo('Aanya'));
+    await p.waitForTimeout(900);
+    assert(await p.$eval('#app', el => el.classList.contains('on')), 'the app never opened');
+    assert(await p.evaluate(() => cur) !== null, 'no conversation opened');
+    const title = await p.$eval('#ttl span', el => el.textContent.trim());
+    assert(title === 'Aanya', 'wrong conversation opened: ' + title);
+    await p.context().close();
+  });
+
+  await test('a notification tap does not open the chat behind an open sheet', async () => {
+    const p = await open(browser);
+    await p.click('#edit');
+    await p.waitForSelector('#sSet.on', { timeout: 4000 });
+    await p.waitForTimeout(300);
+    await p.evaluate(() => window.__composeTo('+91 90000 55555'));
+    await p.waitForTimeout(900);
+    assert(await p.evaluate(() => cur) !== null, 'the chat did not open');
+    assert(!(await p.$eval('#sSet', el => el.classList.contains('on'))), 'the settings sheet stayed on top');
+    assert(!(await p.$eval('#scrim', el => el.classList.contains('on'))), 'the scrim stayed up');
+    await p.context().close();
+  });
+
+  await test('typing in the contacts search does not re-query the provider', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.click('#plus');
+    await p.waitForTimeout(800);
+    const before = await p.evaluate(() => window.__mockCalls('loadContacts').length);
+    for (const q of ['a', 'aa', 'aan', 'aany']) { await p.fill('#cq', q); await p.waitForTimeout(120); }
+    const after = await p.evaluate(() => window.__mockCalls('loadContacts').length);
+    // loadContacts is a full ContactsContract query: it used to run once per key
+    assert(after - before === 0, 'the contact list was re-queried ' + (after - before) + ' times while typing');
+    const rows = await p.$$eval('#clist .row', els => els.length);
+    assert(rows === 1, 'filtering broke: rows=' + rows);
+    await p.context().close();
+  });
+
+  await test('a refused send gives the text back instead of a phantom bubble', async () => {
+    const p = await open(browser);
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    // a send the radio refuses (no service, bad address) answers false
+    await p.evaluate(() => { window.Android.sendSms = function () { return false; }; });
+    await p.fill('#txt', 'this one cannot go out');
+    await p.click('#send');
+    await p.waitForTimeout(500);
+    const bubs = await p.$$eval('#msgs .bub', els => els.map(e => e.textContent.trim()));
+    assert(!bubs.includes('this one cannot go out'), 'a bubble was left for a message that never sent');
+    const draft = await p.$eval('#txt', el => el.value);
+    assert(draft === 'this one cannot go out', 'the text was swallowed: ' + JSON.stringify(draft));
+    await p.context().close();
+  });
+
   console.log('\n— safety —');
   await test('message text is HTML-escaped (no injection through the bridge)', async () => {
     const evil = '<img src=x onerror="window.__xss=1">AT&T <b>bold</b>';

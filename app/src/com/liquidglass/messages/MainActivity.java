@@ -308,7 +308,7 @@ public class MainActivity extends Activity {
                     ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                     new String[]{ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
                             ContactsContract.CommonDataKinds.Phone.NUMBER},
-                    null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
+                    null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC LIMIT 1000");
             if (c != null) {
                 while (c.moveToNext() && seen.size() < 1000) {
                     String name = c.getString(0);
@@ -383,6 +383,11 @@ public class MainActivity extends Activity {
 
     private String threadsJson() {
         Map<Long, JSONObject> seen = new LinkedHashMap<>();
+        // read_at used to be re-parsed from JSON for every stored message - up
+        // to 800 JSON parses on every 6s poll. Read the map once, and index it by
+        // the same comparison key the rest of the store uses.
+        Map<String, Long> readAt = LocalStore.readMap(this);
+        Map<String, Long> readNorm = normReadMap(readAt);
         Cursor c = null;
         try {
             c = getContentResolver().query(
@@ -435,9 +440,6 @@ public class MainActivity extends Activity {
             Map<String, JSONObject> byAddr = new java.util.HashMap<>();
             for (JSONObject o : seen.values()) byAddr.put(LocalStore.norm(o.optString("addr")), o);
             JSONArray local = LocalStore.all(this);
-            // read_at used to be re-parsed from JSON for every stored message - up
-            // to 800 JSON parses on every 6s poll. Read the map once.
-            Map<String, Long> readAt = LocalStore.readMap(this);
             for (int i = 0; i < local.length(); i++) {
                 JSONObject m = local.optJSONObject(i);
                 if (m == null) continue;
@@ -446,7 +448,7 @@ public class MainActivity extends Activity {
                 if (LocalStore.isDeleted(this, addr, m.optString("body"), when)) continue;
                 // same person, possibly written as "+91 98765 43210" and "+919876543210"
                 JSONObject existing = byAddr.get(LocalStore.norm(addr));
-                Long seenAt = readAt.get(addr);
+                Long seenAt = readAtFor(readAt, readNorm, addr);
                 boolean fresh = when > (seenAt == null ? 0L : seenAt);
                 if (existing == null) {
                     JSONObject o = new JSONObject();
@@ -465,6 +467,17 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
 
+        // A conversation read in the app must stay read. The provider refuses our
+        // READ write while we do not hold the default-SMS role, and the store and
+        // the provider spell the same number differently ("+91 98765 43210" vs
+        // "+919876543210"), so the unread dot came back on the very next poll.
+        try {
+            for (JSONObject o : seen.values()) {
+                Long seenAt = readAtFor(readAt, readNorm, o.optString("addr"));
+                if (seenAt != null && o.optLong("date") <= seenAt) o.put("unread", 0);
+            }
+        } catch (Exception ignored) {}
+
         List<JSONObject> list = new ArrayList<>(seen.values());
         Collections.sort(list, new Comparator<JSONObject>() {
             @Override
@@ -475,6 +488,27 @@ public class MainActivity extends Activity {
         JSONArray out = new JSONArray();
         for (JSONObject o : list) out.put(o);
         return out.toString();
+    }
+
+    /** read_at is keyed by whatever the page passed; compare it like an address. */
+    private static Map<String, Long> normReadMap(Map<String, Long> exact) {
+        Map<String, Long> out = new java.util.HashMap<>();
+        for (Map.Entry<String, Long> e : exact.entrySet()) {
+            String k = LocalStore.norm(e.getKey());
+            if (k.isEmpty()) continue;
+            Long cur = out.get(k);
+            if (cur == null || e.getValue() > cur) out.put(k, e.getValue());
+        }
+        return out;
+    }
+
+    /** When this conversation was last opened, however its number is written. */
+    private static Long readAtFor(Map<String, Long> exact, Map<String, Long> norm, String addr) {
+        if (addr == null || addr.isEmpty()) return null;
+        Long v = exact.get(addr);
+        if (v != null) return v;
+        String k = LocalStore.norm(addr);
+        return k.isEmpty() ? null : norm.get(k);
     }
 
     private String messagesJson(long threadId, String addr) {

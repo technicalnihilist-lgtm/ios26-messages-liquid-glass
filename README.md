@@ -37,7 +37,7 @@ No internet permission, no trackers, no libraries, ~70 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.10 (versionCode 15) |
+| Version | 2.11 (versionCode 16) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~70 KB |
@@ -155,7 +155,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 39 behavioural checks
+node tests/ui-tests.js            # 43 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -169,9 +169,61 @@ flatten its depth for good, a draft must not follow you into the next chat, an u
 poll must leave the open thread (and its long-press menu) working, a broadcast that
 changes nothing must repaint nothing, an incoming text must not rebuild the list under
 an open conversation menu, and a number the store writes differently — with or without
-its country code — must never close the open chat or clone it.
+its country code — must never close the open chat or clone it. A notification tap must
+open the chat on top of a closed app or an open sheet, typing in the contacts search must
+not re-query the provider, and a send the radio refuses must give the text back.
 
 `ONLY=<substring> node tests/ui-tests.js` runs just the matching tests.
+
+## What's new in 2.11 — the chat opens where you can see it
+
+**Fixed**
+
+- **Tapping a notification (or an `sms:` link) for a chat that already existed opened it
+  behind a closed app.** `__composeTo` only slid the thread in; it never brought the app
+  itself on screen, so the springboard stayed in front and the conversation was running
+  invisibly behind it. A new number worked, which is why this survived — the bug was on
+  the existing-conversation branch only. The app is now raised first, then the chat.
+- **The same tap could land behind an open sheet or a long-press menu.** An `sms:` link
+  from contacts, the dialer or a notification while the Settings sheet was up put the chat
+  underneath it, with the scrim still swallowing every touch. Both are dismissed first.
+- **A send the radio refused still looked sent.** `sendSms` answers `false` when the
+  message cannot go out (no service, invalid address, provider exception); the page
+  ignored the answer, kept the bubble, cleared the field and dropped the text. The
+  optimistic bubble is now rolled back and the text is put back in the composer.
+- **A conversation you had read came back unread.** While the app is not the default SMS
+  app the provider refuses our `READ` write, so the unread dot returned on the next poll.
+  `read_at` was also matched by exact address, so a text stored as `+919876543210` and a
+  thread the store spells `+91 98765 43210` never matched at all — that conversation kept
+  its dot forever. The list now consults `read_at` through the same normalised comparison
+  the rest of the store uses, and a thread older than the last time it was opened is
+  always read.
+- **Tapping an MMS notification did nothing.** The notification had no content intent.
+
+**Optimised**
+
+- **The contacts search re-queried `ContactsContract` on every keystroke.** Each letter
+  typed in the contacts field ran a fresh `loadContacts()` — a full provider query over up
+  to 1000 rows and every phone number — on the bridge thread, and then filtered the same
+  list again. The list is now fetched once per sheet open (and once more only if the
+  permission result arrives) and filtered in place: 4 keystrokes went from 4 provider
+  queries to 0.
+- **The contacts query itself is bounded.** `ContactsContract` now returns at most 1000
+  rows; the Java loop already stopped there, so the provider was doing the extra work for
+  nothing.
+- **`read_at` is indexed once per poll.** The thread list derives its normalised index from
+  the single `read_at` parse it already did, instead of looking keys up by exact string.
+
+**Reported, not patched** (each would change the approved design or needs your decision)
+
+- The bar/blob parallax string is still missing its closing parenthesis and the wallpaper
+  blobs are still driven by the `drift` animation, so the bars and the wallpaper still do
+  not slide on tilt. That is a motion change, so it stays exactly as approved.
+- **`will-change:transform` is still on every bubble** (300 compositor layers on a
+  300-message thread). Removing it would cut GPU memory, but it could change how the
+  depth repaints on a low-end phone — still waiting on your sign-off.
+- **The signing key is not in the repository**, so this APK will not install over 2.10 in
+  place: uninstall the old build first (see *Download & install*).
 
 ## What's new in 2.10 — the list stops moving under your finger
 

@@ -33,7 +33,7 @@ echo "==> javac";          javac -nowarn -source 8 -target 8 \
     -bootclasspath "$AJAR" -classpath "$AJAR" -d "$OUT/classes" \
     "$OUT/gen/com/liquidglass/messages/R.java" \
     $(find src -name "*.java")
-echo "==> d8";             "$BT/d8" --release --min-api 24 --lib "$AJAR" \
+echo "==> d8";             "$BT/d8" -JXmx512M -JXX:MaxMetaspaceSize=256m --release --min-api 24 --lib "$AJAR" \
     --output "$OUT/dex" $(find "$OUT/classes" -name "*.class")
 echo "==> package";        (cd "$OUT/dex" && zip -q -X "$OUT/unsigned.apk" classes.dex)
 echo "==> zipalign";       "$BT/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
@@ -46,7 +46,7 @@ if [ ! -f "$KS" ]; then
 fi
 
 echo "==> sign"
-"$BT/apksigner" sign --ks "$KS" --ks-pass pass:liquidglass --key-pass pass:liquidglass \
+"$BT/apksigner" -JXmx256M sign --ks "$KS" --ks-pass pass:liquidglass --key-pass pass:liquidglass \
   --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
   --out "$OUT/Messages-LiquidGlass.apk" "$OUT/aligned.apk"
 mkdir -p "$ROOT/apk"
