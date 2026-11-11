@@ -37,7 +37,7 @@ No internet permission, no trackers, no libraries, ~70 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.11 (versionCode 16) |
+| Version | 2.12 (versionCode 17) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~70 KB |
@@ -155,7 +155,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 43 behavioural checks
+node tests/ui-tests.js            # 45 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -171,9 +171,66 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, and a send the radio refuses must give the text back.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring> node tests/ui-tests.js` runs just the matching tests.
+
+## What's new in 2.12 — the sheet that closed itself
+
+**Fixed**
+
+- **Dismissing a sheet and reopening it quickly made it vanish, with the scrim left
+  behind.** A sheet's exit animation runs for ~400 ms and the scrim is dropped the
+  instant you tap *Done*, so the gear is already live while the sheet is still sliding
+  away. Opening it again inside that window added `.on` — and the *old* exit animation
+  then finished and took `.on` straight back off. The sheet disappeared and the scrim
+  stayed up over an empty screen, swallowing every tap until you tapped the scrim to
+  clear it. `sheet()` and `closeSheets()` now share one generation counter (the same
+  pattern `openApp`/`closeApp` and the context menu already used) and a reopened sheet
+  cancels the stale exit animation. It was one shared helper, so every sheet — settings,
+  new message, contacts, default-app — had it.
+- **The same class of bug in the long-press menu with the bounce effect off.** With
+  bounce disabled `hideMenu()` removed `.on` synchronously and never touched the
+  generation counter, so a hide that had started before you switched bounce off could
+  still complete afterwards and close a menu you had reopened since.
+- **Repeated closes stacked exit animations on one sheet.** Each close now cancels the
+  previous exit animation before starting its own, so only the newest one can finish.
+
+**Optimised**
+
+- **`esc()` is one pass** with a lookup table instead of four chained `replace()` calls.
+  It runs for every bubble, row and contact on every render.
+- **The contacts list only rewrites `#clist` when the filtered markup actually
+  changes.** Typing a letter that cannot narrow the list any further no longer throws
+  away and rebuilds up to 200 rows (with their avatars) for nothing — the same
+  string-compare the conversation list has used since 2.10.
+- **The Depth slider coalesces into one pass per frame.** Dragging it ran the full depth
+  pass for every `input` event, ~3.5 ms per pixel of travel on a 300-bubble thread; it
+  now runs once per animation frame, which is the only rate the screen can show.
+- **The parallax frame no longer allocates.** The pointer and the gyroscope hand their
+  coordinates over in two scalars instead of a fresh `[x, y]` array per event, on a path
+  that a sensor can drive at 100 Hz.
+- **The browser harness recycles Chromium every 8 contexts.** On a machine with ~2 GB of
+  RAM the browser process was OOM-killed after roughly forty contexts, which killed the
+  *last* check with *"target page, context or browser has been closed"* and made a
+  green suite look flaky. 45/45 now passes reliably, and a render of a 300-message
+  thread measures ~78 ms with the depth pass at ~4 ms/frame.
+
+**Reported, not patched** (each would change the approved design or needs your decision)
+
+- The bar/blob parallax string is still missing its closing parenthesis and the wallpaper
+  blobs are still driven by the `drift` animation, so the bars and the wallpaper still do
+  not slide on tilt. That is a motion change, so it stays exactly as approved.
+- **`will-change:transform` is still on every bubble** (300 compositor layers on a
+  300-message thread). Removing it would cut GPU memory, but it could change how the
+  depth repaints on a low-end phone — still waiting on your sign-off.
+- **A very long conversation is still rendered in full.** 300 messages cost ~78 ms of
+  layout; a few thousand would crawl. A windowed list (or a *load earlier* affordance)
+  would fix it, but it changes what is on screen.
+- **The Bounce-strength label reads "6/10" if you drag the slider while the bounce
+  toggle is off** — the toggle itself correctly says *Off*, the label does not.
+- **The signing key is not in the repository**, so this APK will not install over 2.11 in
+  place: uninstall the old build first (see *Download & install*).
 
 ## What's new in 2.11 — the chat opens where you can see it
 

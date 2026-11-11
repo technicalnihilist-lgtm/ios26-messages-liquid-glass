@@ -55,8 +55,36 @@ async function test(name, fn) {
 
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
 
-async function open(browser, cfg, opts) {
-  const ctx = await browser.newContext({
+/*
+ * Chromium is recycled every RECYCLE contexts. A phone-sized page with live
+ * backdrop-filter blur is not cheap in software GL, and on a small machine the
+ * browser process is OOM-killed after roughly forty contexts - which used to
+ * kill the *last* test with "target page, context or browser has been closed"
+ * and made the suite look flaky when it was only out of memory.
+ */
+const RECYCLE = +(process.env.RECYCLE_EVERY || 8);
+let liveBrowser = null, ctxSinceLaunch = 0;
+async function launchBrowser() {
+  return chromium.launch({
+    executablePath: CHROME,
+    args: ['--no-sandbox', '--allow-file-access-from-files', '--force-color-profile=srgb']
+  });
+}
+async function freshBrowserIfNeeded() {
+  const dead = !liveBrowser || !liveBrowser.isConnected();
+  if (dead || ctxSinceLaunch >= RECYCLE) {
+    if (liveBrowser && liveBrowser.isConnected()) {
+      try { await liveBrowser.close(); } catch (e) {}
+    }
+    liveBrowser = await launchBrowser();
+    ctxSinceLaunch = 0;
+  }
+  ctxSinceLaunch++;
+}
+
+async function open(_unused, cfg, opts) {
+  await freshBrowserIfNeeded();
+  const ctx = await liveBrowser.newContext({
     viewport: { width: 430, height: 900 },
     deviceScaleFactor: 1,
     colorScheme: (opts && opts.dark) ? 'dark' : 'light'
@@ -80,14 +108,11 @@ async function open(browser, cfg, opts) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: CHROME,
-    args: ['--no-sandbox', '--allow-file-access-from-files', '--force-color-profile=srgb']
-  });
+  liveBrowser = await launchBrowser();
 
   console.log('\n— boot & list —');
   await test('app boots and renders the conversation list', async () => {
-    const p = await open(browser);
+    const p = await open();
     const rows = await p.$$eval('#rows .row', els => els.length);
     assert(rows === 3, 'expected 3 rows, got ' + rows);
     assert(await p.$eval('#app', el => el.classList.contains('on')), 'app not shown');
@@ -96,7 +121,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('empty store shows the empty state', async () => {
-    const p = await open(browser, { threads: [], msgs: {} });
+    const p = await open(null, { threads: [], msgs: {} });
     const txt = await p.$eval('#rows', el => el.textContent.trim());
     assert(/No Conversations/.test(txt), 'empty state missing: ' + txt);
     await p.context().close();
@@ -104,7 +129,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('\n— threads & messages —');
   await test('opening a thread renders its messages in order with correct sides', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     const bubs = await p.$$eval('#msgs .bub', els => els.map(e => [e.className, e.textContent.trim()]));
@@ -117,7 +142,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('thread header shows the real date, not a hardcoded time', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 11, addr: 'Aanya', snippet: 'old', date: T938 - 6 * 86400000, unread: 0 }],
       msgs: { Aanya: [{ id: 1, body: 'old', date: T938 - 6 * 86400000, out: 0 }] }
     });
@@ -131,7 +156,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('opening a thread marks it read', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(400);
     const calls = await p.evaluate(() => window.__mockCalls('markRead'));
@@ -141,7 +166,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('\n— sending —');
   await test('sending a text goes through the native bridge', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(400);
     await p.fill('#txt', 'On my way');
@@ -157,7 +182,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('empty input does not send', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(400);
     await p.fill('#txt', '   ');
@@ -170,7 +195,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('\n— delete & tombstones —');
   await test('long-press a bubble and delete it (tombstoned)', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(450);
     const box = await p.$eval('#msgs .bub', el => {
@@ -201,7 +226,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('long-press a conversation and delete the thread', async () => {
-    const p = await open(browser);
+    const p = await open();
     const box = await p.$eval('#rows .row[data-i="0"]', el => {
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -222,7 +247,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('copy puts the bubble text on the clipboard', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(450);
     const box = await p.$eval('#msgs .bub', el => {
@@ -247,7 +272,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await test('an incoming message appears and does not yank a scrolled-up reader', async () => {
     const many = [];
     for (let i = 0; i < 40; i++) many.push({ id: 100 + i, body: 'message ' + i, date: T938 + i * 60000, out: i % 2 });
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 11, addr: 'Aanya', snippet: 'message 39', date: T938 + 39 * 60000, unread: 0 }],
       msgs: { Aanya: many }
     });
@@ -268,7 +293,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('an incoming message shows up when at the bottom', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(450);
     await p.evaluate(() => {
@@ -282,7 +307,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a poll does not drop the conversation you just composed', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#compose');
     await p.waitForTimeout(350);
     await p.fill('#newName', '+91 90000 00001');
@@ -303,7 +328,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('composing a number that already has a conversation reuses it', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#compose');
     await p.waitForTimeout(350);
     await p.fill('#newName', 'Aanya');
@@ -317,7 +342,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('an incoming message does not rebuild the thread under an open menu', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     await p.evaluate(() => openCtx(document.querySelectorAll('#msgs .bub')[0]));
@@ -343,7 +368,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('\n— poll safety —');
   await test('an unchanged poll keeps the open thread usable', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     const before = await p.evaluate(() => T[cur].m.length);
@@ -363,7 +388,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('an unchanged poll does not rebuild the open thread', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     await p.evaluate(() => { document.querySelector('#msgs .bub').__probe = 1; });
@@ -375,7 +400,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a broadcast that changes nothing rebuilds neither thread nor list', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     // __onSmsChanged fires for every SMS broadcast - a role grant, an MMS notice,
@@ -404,7 +429,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('an incoming message does not rebuild the list under an open row menu', async () => {
-    const p = await open(browser);
+    const p = await open();
     const box = await p.$eval('#rows .row[data-i="0"]', el => {
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -440,7 +465,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('composing a bare number reuses the +91 conversation', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 9, addr: '+919876543210', snippet: 'yo', date: T938, unread: 0 }],
       msgs: { '+919876543210': [{ id: 91, body: 'yo', date: T938, out: 0 }] },
       contacts: []
@@ -456,7 +481,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('an open chat survives the store re-spelling the number', async () => {
-    const p = await open(browser, { threads: [], msgs: {} });
+    const p = await open(null, { threads: [], msgs: {} });
     await p.evaluate(() => newChat('+91 98765 43210'));
     await p.waitForTimeout(300);
     await p.evaluate(() => {
@@ -473,7 +498,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a contact whose number is written differently reuses the conversation', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 9, addr: '+919876543210', snippet: 'yo', date: T938, unread: 0 }],
       msgs: { '+919876543210': [{ id: 91, body: 'yo', date: T938, out: 0 }] },
       contacts: [{ name: 'Aanya', number: '+91 98765 43210' }]
@@ -490,7 +515,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('an sms: link whose number is written differently reuses the conversation', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 9, addr: '+919876543210', snippet: 'yo', date: T938, unread: 0 }],
       msgs: { '+919876543210': [{ id: 91, body: 'yo', date: T938, out: 0 }] },
       contacts: []
@@ -503,7 +528,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a notification tap opens the chat even when the app was closed', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.evaluate(() => closeApp());
     await p.waitForTimeout(900);
     assert(!(await p.$eval('#app', el => el.classList.contains('on'))), 'the app was still open');
@@ -520,7 +545,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a notification tap does not open the chat behind an open sheet', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#edit');
     await p.waitForSelector('#sSet.on', { timeout: 4000 });
     await p.waitForTimeout(300);
@@ -533,7 +558,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('typing in the contacts search does not re-query the provider', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     await p.click('#plus');
@@ -549,7 +574,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a refused send gives the text back instead of a phantom bubble', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     // a send the radio refuses (no service, bad address) answers false
@@ -567,7 +592,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   console.log('\n— safety —');
   await test('message text is HTML-escaped (no injection through the bridge)', async () => {
     const evil = '<img src=x onerror="window.__xss=1">AT&T <b>bold</b>';
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 11, addr: 'Aanya', snippet: evil, date: T938, unread: 0 }],
       msgs: { Aanya: [{ id: 1, body: evil, date: T938, out: 0 }] }
     });
@@ -586,7 +611,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a contact name cannot inject markup either', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [], msgs: {},
       contacts: [{ name: '<img src=x onerror="window.__xss=2">', number: '123456' }]
     });
@@ -604,7 +629,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('\n— settings & persistence —');
   await test('glass sliders persist their value', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#edit');
     await p.waitForTimeout(450);
     await p.evaluate(() => {
@@ -623,7 +648,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('saved settings are restored on the next launch', async () => {
-    const p = await open(browser, Object.assign({}, BASE, {
+    const p = await open(null, Object.assign({}, BASE, {
       prefs: { ga: '55', blur: '40', bounce: '0', theme: 'dark', d3: '1', depth: '8', par: '2', tilt: '9' }
     }));
     const v = await p.evaluate(() => ({
@@ -642,7 +667,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('dark mode toggle persists', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#edit');
     await p.waitForTimeout(450);
     await p.click('#td');
@@ -653,7 +678,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('default-SMS prompt appears when the role is not held', async () => {
-    const p = await open(browser, Object.assign({}, BASE, { defaultSms: false }));
+    const p = await open(null, Object.assign({}, BASE, { defaultSms: false }));
     await p.waitForTimeout(1200);
     const on = await p.$eval('#sDefault', el => el.classList.contains('on'));
     assert(on, 'default-app sheet never appeared');
@@ -664,8 +689,52 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('reopening a sheet inside its exit animation keeps the sheet up', async () => {
+    // Done and the gear again within the ~400ms close animation: the old exit
+    // animation used to finish afterwards and take .on straight back off the
+    // reopened sheet, leaving the scrim up with nothing under it.
+    const p = await open();
+    await p.click('#edit');
+    await p.waitForTimeout(500);
+    await p.click('#sSet [data-close]');
+    await p.waitForTimeout(120);
+    await p.evaluate(() => document.getElementById('edit').click());
+    await p.waitForTimeout(900);
+    const v = await p.evaluate(() => ({
+      sheet: document.getElementById('sSet').classList.contains('on'),
+      scrim: document.getElementById('scrim').classList.contains('on'),
+      hit: (() => { const el = document.elementFromPoint(215, 450); return el ? (el.closest('.sheet') || {}).id || el.className : 'none'; })()
+    }));
+    assert(v.sheet, 'the reopened settings sheet vanished');
+    assert(v.scrim, 'scrim should still be up under an open sheet');
+    assert(v.hit === 'sSet', 'taps in the middle of the screen no longer reach the sheet: ' + v.hit);
+    // and it can still be dismissed normally afterwards
+    await p.click('#sSet [data-close]');
+    await p.waitForTimeout(700);
+    const closed = await p.evaluate(() => ({
+      sheet: document.getElementById('sSet').classList.contains('on'),
+      scrim: document.getElementById('scrim').classList.contains('on')
+    }));
+    assert(!closed.sheet && !closed.scrim, 'sheet/scrim did not close: ' + JSON.stringify(closed));
+    await p.context().close();
+  });
+
+  await test('closing a sheet twice does not leave the scrim up', async () => {
+    const p = await open();
+    await p.click('#compose');
+    await p.waitForTimeout(500);
+    await p.evaluate(() => { document.querySelector('#sNew [data-close]').click(); document.querySelector('#sNew [data-close]').click(); });
+    await p.waitForTimeout(800);
+    const v = await p.evaluate(() => ({
+      sheet: document.querySelectorAll('.sheet.on').length,
+      scrim: document.getElementById('scrim').classList.contains('on')
+    }));
+    assert(v.sheet === 0 && !v.scrim, 'a double close left the UI stuck: ' + JSON.stringify(v));
+    await p.context().close();
+  });
+
   await test('no default-SMS prompt when the role is already held', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.waitForTimeout(1300);
     const on = await p.$eval('#sDefault', el => el.classList.contains('on'));
     assert(!on, 'default-app sheet shown even though the role is held');
@@ -674,7 +743,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('\n— navigation, depth & performance —');
   await test('hardware back unwinds menu -> sheet -> thread -> app', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     assert(await p.evaluate(() => window.__androidBack()) === true, 'back did not consume the thread');
@@ -693,7 +762,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('3D depth still applies to bubbles', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 11, addr: 'Aanya', snippet: 'hi', date: T938, unread: 0 }],
       msgs: { Aanya: MSGS_AANYA }
     });
@@ -707,7 +776,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('pressing a bubble does not flatten its depth for good', async () => {
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 11, addr: 'Aanya', snippet: 'hi', date: T938, unread: 0 }],
       msgs: { Aanya: MSGS_AANYA }
     });
@@ -731,7 +800,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('a draft is not carried into the next conversation', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     await p.fill('#txt', 'half-written');
@@ -747,7 +816,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('search filters the list', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.fill('#q', 'roh');
     await p.waitForTimeout(250);
     const rows = await p.$$eval('#rows .row', els => els.length);
@@ -756,7 +825,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('compose creates a new conversation', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#compose');
     await p.waitForTimeout(400);
     await p.fill('#newName', '+91 90000 11111');
@@ -769,7 +838,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('contacts sheet opens a thread for the tapped contact', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]');
     await p.waitForTimeout(500);
     await p.click('#plus');
@@ -786,7 +855,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await test('a 300-message thread renders and scrolls within budget', async () => {
     const big = [];
     for (let i = 0; i < 300; i++) big.push({ id: 500 + i, body: 'bulk message number ' + i, date: T938 + i * 1000, out: i % 2 });
-    const p = await open(browser, {
+    const p = await open(null, {
       threads: [{ id: 11, addr: 'Aanya', snippet: 'bulk', date: T938, unread: 0 }],
       msgs: { Aanya: big }
     });
@@ -807,7 +876,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
 
   await test('no uncaught errors during a full interactive pass', async () => {
-    const p = await open(browser);
+    const p = await open();
     await p.click('#rows .row[data-i="0"]'); await p.waitForTimeout(450);
     await p.fill('#txt', 'hello'); await p.click('#send'); await p.waitForTimeout(600);
     await p.click('#back'); await p.waitForTimeout(500);
@@ -824,7 +893,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
-  await browser.close();
+  if (liveBrowser && liveBrowser.isConnected()) await liveBrowser.close();
 
   console.log('\n' + '='.repeat(52));
   console.log(`${results.length - failures}/${results.length} passed`);

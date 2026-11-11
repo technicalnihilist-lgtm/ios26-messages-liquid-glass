@@ -175,7 +175,10 @@ function fmtTime(ms){if(!ms)return'';const d=new Date(ms),n=new Date();
  return d.toLocaleDateString(undefined,{weekday:'short'})}
 function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
 function ini(s){const m=String(s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
-function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+const ESCMAP={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'};
+/* one pass instead of four: this runs for every bubble, row and contact on
+   every render, and a body with no special character now costs one scan */
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>ESCMAP[c])}
 /* Run `fn` when a Web Animation settles. onfinish alone is not enough: an
    animation that is cancelled (or that never gets its first frame) would leave
    the sheet / menu / app stuck open and a delete that never reaches the store. */
@@ -323,10 +326,20 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
  const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
  const ci=cur;t.typing=true;setTimeout(()=>{if(cur===ci){renderThread();const e=[...document.querySelectorAll('.typing')].pop();e&&pop(e)}},500);
  setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('.bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
-function sheet(id){document.querySelectorAll('.sheet.on').forEach(o=>{if('#'+o.id!==id)o.classList.remove('on')});
- $('#scrim').classList.add('on');const s=$(id);s.classList.add('on');spring(s,'translateY(110%)',['translateY(-'+(2+S.k*10)+'px)','translateY('+(S.k*4)+'px)','translateY(-'+S.k*2+'px)'],'translateY(0)',700)}
-function closeSheets(){document.querySelectorAll('.sheet.on').forEach(s=>{if(!S.on){s.classList.remove('on');return}
- const a=s.animate([{transform:'translateY(0)'},{transform:'translateY(-'+S.k*8+'px)',offset:.25},{transform:'translateY(110%)'}],{duration:(1.1-S.sp)*400,easing:'ease-in'});done(a,()=>s.classList.remove('on'))});$('#scrim').classList.remove('on');closeCtx()}
+/* A close animation outlives the sheet it is closing. Tapping Done and then the
+   gear again inside those ~400ms opened the sheet and the *old* exit animation
+   finished a moment later and took .on straight back off it: the sheet vanished
+   and the scrim stayed up, eating every tap. One counter, like openApp/closeApp
+   and the context menu: only the newest open/close may touch the class. */
+let sheetGen=0;
+function stopAnims(el){try{el.getAnimations().forEach(a=>{try{a.cancel()}catch(e){}})}catch(e){}}
+function sheet(id){sheetGen++;
+ document.querySelectorAll('.sheet.on').forEach(o=>{if('#'+o.id!==id){stopAnims(o);o.classList.remove('on')}});
+ $('#scrim').classList.add('on');const s=$(id);stopAnims(s);s.classList.add('on');spring(s,'translateY(110%)',['translateY(-'+(2+S.k*10)+'px)','translateY('+(S.k*4)+'px)','translateY(-'+S.k*2+'px)'],'translateY(0)',700)}
+function closeSheets(){const gen=++sheetGen;
+ document.querySelectorAll('.sheet.on').forEach(s=>{if(!S.on){s.classList.remove('on');return}
+ stopAnims(s);
+ const a=s.animate([{transform:'translateY(0)'},{transform:'translateY(-'+S.k*8+'px)',offset:.25},{transform:'translateY(110%)'}],{duration:(1.1-S.sp)*400,easing:'ease-in'});done(a,()=>{if(gen===sheetGen)s.classList.remove('on')})});$('#scrim').classList.remove('on');closeCtx()}
 // press bounce on everything touchable
 let pr=null;
 const SEL='button,.ci,.row,.bub,.av,.search,.field,.sheet .ctl input,.cont,.dock,.sw';
@@ -396,7 +409,8 @@ applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'da
 // ================= 3D / 4D depth engine =================
 const D={on:true,strength:.5,par:.5,tilt:.6};
 const clamp1=v=>Math.max(-1,Math.min(1,v));
-let parX=0,parY=0,raf=null,parRaf=0,parQ=null;
+const PAR_AMT=[30,48,22];
+let parX=0,parY=0,raf=null,parRaf=0,parX0=null,parY0=null;
 let parBlobs=null,parBars=null,parPhone=null,parPhoneRect=null;
 /* Both writes below are dead as the design stands (see the note under this
    function), and a style write the cascade throws away still dirties style on
@@ -416,7 +430,7 @@ addEventListener('resize',()=>{parPhoneRect=null;geoReset()},{passive:true});
 // design owner has to sign off on. Reported, not patched.
 function applyParallax(nx,ny){
  parX=nx;parY=ny;parCache();
- const amt=[30,48,22];
+ const amt=PAR_AMT;
  if(parBlobLive)parBlobs.forEach((b,i)=>{
    const d=amt[i%amt.length]*D.par*2;
    b.style.transform=`translate3d(${(-nx*d).toFixed(1)}px,${(-ny*d).toFixed(1)}px,0)`});
@@ -487,9 +501,11 @@ function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
    this, so a sensor firing at 100Hz costs one transform pass per frame
    instead of one per event */
 function queueParallax(nx,ny){
- parQ=[nx,ny];if(parRaf)return;
- parRaf=requestAnimationFrame(()=>{parRaf=0;const q=parQ;parQ=null;if(!q||!D.on)return;
-  parCache();applyParallax(q[0],q[1])});}
+ /* two scalars, not a fresh [x,y] array per frame: the pointer and the gyroscope
+    can both feed this at 100Hz and neither needs an allocation to hand it over */
+ parX0=nx;parY0=ny;if(parRaf)return;
+ parRaf=requestAnimationFrame(()=>{parRaf=0;const x=parX0,y=parY0;parX0=parY0=null;if(x===null||!D.on)return;
+  parCache();applyParallax(x,y)});}
 // pointer / touch parallax over the whole phone
 document.addEventListener('pointermove',e=>{
  if(!D.on||e.pointerType==='touch')return;
@@ -554,7 +570,11 @@ $('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/
 $('#t3d').classList.toggle('on',D.on);
 /* dragging a slider fires an input event per pixel: writing all ten prefs on
    each one meant dozens of SharedPreferences commits per drag */
-bind('#r5','#v5',v=>{D.strength=v/10;saveSoon();depthScroll()},v=>v+'/10');
+/* dragging this slider fired an input event per pixel and ran the whole depth
+   pass for each one; the frame is the only thing that can show the change */
+let depthRaf=0;
+function queueDepth(){if(depthRaf)return;depthRaf=requestAnimationFrame(()=>{depthRaf=0;depthScroll()})}
+bind('#r5','#v5',v=>{D.strength=v/10;saveSoon();queueDepth()},v=>v+'/10');
 bind('#r6','#v6',v=>{D.par=v/10;saveSoon();applyParallax(parX,parY)},v=>v+'/10');
 bind('#r7','#v7',v=>{D.tilt=v/10;saveSoon()},v=>v+'/10');
 $('#t3d').onclick=function(){setDepth(!D.on)};
@@ -597,8 +617,13 @@ let deferRows=false;     // ... and the same for the conversation list
 /* a hide still in flight must not remove .on from a menu that has been reopened
    since: both paths share one counter and only the newest one may act */
 let ctxGen=0;
-function hideMenu(){const m=$('#ctx');if(!m.classList.contains('on'))return;if(!S.on){m.classList.remove('on');return}
+function hideMenu(){const m=$('#ctx');if(!m.classList.contains('on'))return;
+ /* bump first: with the bounce off the menu is hidden with no animation at all,
+    and a hide that was already in flight (from before the toggle) could still
+    finish afterwards and take .on off a menu that has since been reopened */
  const gen=++ctxGen;
+ if(!S.on){stopAnims(m);m.classList.remove('on');return}
+ stopAnims(m);
  const a=m.animate([{transform:'scale(1)',opacity:1},{transform:'scale(.6)',opacity:0}],{duration:160,easing:'ease-in'});done(a,()=>{if(gen===ctxGen)m.classList.remove('on')})}
 function closeCtx(){hideMenu();if(X.g){X.g.remove();X.g=null}
  /* the anchor had its transition switched off while it was measured: put the
@@ -723,11 +748,18 @@ let contactsCache=null;
 function contactsList(){if(contactsCache)return contactsCache;
  let arr=[];try{arr=JSON.parse(BR.loadContacts()||'[]')}catch(e){}
  contactsCache=Array.isArray(arr)?arr:[];return contactsCache}
+/* the filtered list is rebuilt on every keystroke: writing back the same markup
+   threw away every contact row (and its avatar) for nothing. Only touch #clist
+   when the visible list actually changes. */
+let clistHtml='';
 function renderContacts(q){if(!BR)return;const arr=contactsList();
- if(!arr.length){$('#clist').innerHTML='<p class="perm">Contacts access is off. Allow it, or tap the compose button and type a number.</p>';return}
+ if(!arr.length){const h='<p class="perm">Contacts access is off. Allow it, or tap the compose button and type a number.</p>';
+  if(h!==clistHtml){clistHtml=h;$('#clist').innerHTML=h}return}
  const f=(q||'').toLowerCase().trim();
  const list=arr.filter(c=>!f||(c.name||'').toLowerCase().includes(f)||(c.number||'').includes(f)).slice(0,200);
- $('#clist').innerHTML=list.map(c=>{const nm=c.name||c.number||'';return `<div class="row cont" data-num="${esc(String(c.number||''))}"><div class="av" style="background:${colorFor(nm)};width:40px;height:40px;font-size:17px">${esc(ini(nm))}</div><div class="rt"><b>${esc(nm)}<small style="font-weight:400;font-size:13px">${esc(c.number||'')}</small></b></div></div>`}).join('')||'<p class="perm">No contact matches that.</p>'}
+ const html=list.map(c=>{const nm=c.name||c.number||'';return `<div class="row cont" data-num="${esc(String(c.number||''))}"><div class="av" style="background:${colorFor(nm)};width:40px;height:40px;font-size:17px">${esc(ini(nm))}</div><div class="rt"><b>${esc(nm)}<small style="font-weight:400;font-size:13px">${esc(c.number||'')}</small></b></div></div>`}).join('')||'<p class="perm">No contact matches that.</p>';
+ if(html===clistHtml)return;
+ clistHtml=html;$('#clist').innerHTML=html}
 function openContacts(){if(!BR)return;contactsCache=null;$('#cq').value='';renderContacts('');
  if(!BR.hasContactsPermission()){try{BR.requestContactsPermission()}catch(e){}}
  sheet('#sContacts');setTimeout(()=>renderContacts(''),400)}
