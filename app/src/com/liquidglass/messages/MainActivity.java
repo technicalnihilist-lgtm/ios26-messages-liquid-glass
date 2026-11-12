@@ -285,8 +285,10 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
+        // one status push: this used to evaluate __onSmsStatus twice, so every
+        // answer to a permission dialog ran two RoleManager queries and two
+        // bridge round-trips for the same result
         pushStatus();
-        js("window.__onSmsStatus && window.__onSmsStatus()");
         if (code == REQ_CONTACTS) {
             js("window.__onContactsReady && window.__onContactsReady()");
         }

@@ -589,6 +589,74 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('a store rebuild keeps the open chat\'s messages', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    // a text arrives in a conversation you are not looking at: the list is
+    // rebuilt from the store, and a store row only carries the one-line snippet
+    await p.evaluate(() => {
+      window.__mockPush('Rohan', 'from another chat', 0);
+      window.__mock.threads.forEach(t => { if (t.addr === 'Rohan') t.date = Date.now(); });
+      window.__mockPersist();
+      loadThreads();                       // the rebuild on its own, no reload
+    });
+    const m = await p.evaluate(() => T[cur].m.map(x => x.x));
+    assert(m.length === 2 && m[0] === 'Booked! See you at 8',
+      'the open chat collapsed to its snippet: ' + JSON.stringify(m));
+    // ... and the bubble on screen is still the message it looks like
+    const del = await p.evaluate(() => {
+      openCtx(document.querySelectorAll('#msgs .bub')[0]);
+      return X.msg && X.msg.x;
+    });
+    assert(del === 'Booked! See you at 8', 'the long-press aimed at the wrong message: ' + JSON.stringify(del));
+    await p.context().close();
+  });
+
+  await test('a chat deleted in another app does not strand the thread screen', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.evaluate(() => {
+      // Aanya is gone from the store, the other two are still there
+      window.__mock.threads = window.__mock.threads.filter(t => t.id !== 11);
+      delete window.__mock.msgs['Aanya'];
+      window.__mockPersist();
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(500);
+    const st = await p.evaluate(() => ({
+      cur,
+      thread: document.querySelector('#thread').style.transform,
+      list: document.querySelector('#list').style.transform,
+      rows: document.querySelectorAll('#rows .row').length
+    }));
+    assert(st.cur === null, 'cur still points at a deleted chat: ' + st.cur);
+    assert(/translateX\(100%\)/.test(st.thread), 'the dead chat is still on screen: ' + st.thread);
+    assert(/translateX\(0px\)|^$/.test(st.list), 'the list is still pushed off-screen: ' + st.list);
+    assert(st.rows === 2, 'the list did not come back: ' + st.rows);
+    await p.context().close();
+  });
+
+  await test('an empty store read does not throw you out of the open chat', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    // a provider hiccup returns nothing at all - that is not a delete
+    await p.evaluate(() => {
+      window.__mock.threads = [];
+      window.__mock.msgs = {};
+      window.__mockPersist();
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(400);
+    const cur = await p.evaluate(() => cur);
+    assert(cur === null, 'cur should be dropped, got ' + cur);
+    const thread = await p.evaluate(() => document.querySelector('#thread').style.transform);
+    assert(!/translateX\(100%\)/.test(thread), 'an empty read closed the chat: ' + thread);
+    await p.context().close();
+  });
+
   console.log('\n— safety —');
   await test('message text is HTML-escaped (no injection through the bridge)', async () => {
     const evil = '<img src=x onerror="window.__xss=1">AT&T <b>bold</b>';

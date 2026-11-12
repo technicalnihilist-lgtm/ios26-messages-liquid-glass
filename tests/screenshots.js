@@ -206,7 +206,7 @@ async function openThreadByIndex(p, i) {
   for (const scene of SCENES) {
     const ctx = await browser.newContext({ viewport: { width: 430, height: 900 }, deviceScaleFactor: 3, colorScheme: 'light' });
     const p = await ctx.newPage();
-    p.setDefaultTimeout(6000);
+    p.setDefaultTimeout(20000);
     const errs = [];
     p.on('pageerror', e => errs.push(String(e)));
     await p.addInitScript(mockBridgeSource(scene.cfg));

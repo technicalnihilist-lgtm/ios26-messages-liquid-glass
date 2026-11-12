@@ -5,7 +5,7 @@ aesthetic — rebuilt as a real, installable **Android APK**.
 
 The whole UI is one self-contained HTML file running inside a hardened WebView shell
 that talks to Android's real SMS stack — it can be your **default messaging app**.
-No internet permission, no trackers, no libraries, ~70 KB APK.
+No internet permission, no trackers, no libraries, ~77 KB APK.
 
 <p align="center">
   <img src="screenshots/01-home.png" width="220" alt="Home screen">
@@ -37,10 +37,10 @@ No internet permission, no trackers, no libraries, ~70 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.12 (versionCode 17) |
+| Version | 2.13 (versionCode 18) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~70 KB |
+| Size | ~77 KB |
 | Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, notifications |
 | Internet | **not requested** — the app cannot reach the network at all |
 
@@ -155,7 +155,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 45 behavioural checks
+node tests/ui-tests.js            # 48 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -171,9 +171,76 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring> node tests/ui-tests.js` runs just the matching tests.
+
+## What's new in 2.13 — the chat that forgot its own messages
+
+**Fixed**
+
+- **A long-press could delete a different message than the one you pressed.**
+  The conversation list is rebuilt from the SMS store on every poll, and a store row
+  carries only the *one-line snippet* — the real message array lives in memory. The
+  rebuild threw that array away and put the snippet in its place, so the screen kept
+  showing every bubble while the array behind it held a single fake one. Every caller
+  reloads the open chat immediately afterwards, which is why it was invisible in
+  normal use, but when that reload failed (a bridge hiccup, a malformed store read)
+  the damage stayed: the next long-press on any bubble opened Copy/Delete for
+  whatever sat at that index, and Delete removed the wrong text. The open chat's
+  messages now survive the rebuild, so the invariant no longer depends on the caller.
+- **A conversation deleted in another app stranded you inside it.** The thread screen
+  stayed up with stale bubbles, the list stayed pushed off-screen, and the composer
+  silently did nothing at all — `cur` was already `null`, so `sendMsg()` returned
+  before it sent anything. The thread now unwinds back to the list the way the back
+  button would. It only unwinds when the store still lists conversations: an empty
+  read is a provider hiccup, not a delete, and must not throw you out of a chat.
+- **Answering a permission dialog asked the system twice.** `onRequestPermissionsResult`
+  evaluated `__onSmsStatus` twice, so every permission answer ran two `RoleManager`
+  queries and two JS bridge round-trips for one result. One push now.
+
+**Optimised**
+
+- **The depth pass only poses the bubbles that can be seen.** `depthScroll()` used to
+  compute and write a transform for all 300 bubbles of a long thread on every scroll
+  frame, most of them clipped away outside the scrollport. A bubble more than half a
+  viewport outside the visible band keeps the pose it already has — its few tens of
+  pixels of Z and Y cannot pull it back into view — and is recomputed the moment it
+  scrolls into range. On a 300-message thread that is **21.7 ms → 6.5 ms** per scroll
+  frame (median of seven, software GL) and **9.7 ms → 0.3 ms** for a full pass that
+  writes every bubble, which is what a scroll actually costs. Frames are unchanged:
+  all 14 screenshots, and a 60-message thread captured mid-scroll at three scroll
+  offsets, come out byte-for-byte identical before and after.
+
+**Corrected notes**
+
+- The comment above the parallax code claimed neither the bars nor the wallpaper move,
+  because the bar string is missing its closing parenthesis. Measured in the browser:
+  the CSS parser closes that paren itself, so the two bars **do** slide with the
+  pointer and the gyroscope (`translate3d(6.3px,-1.8px,0)` really lands), while the
+  wallpaper blobs do not, because the infinite `drift` animation owns their transform
+  and overrides the inline one — which is exactly why `parBlobLive` turns that write
+  off. The comment now says so; no behaviour changed.
+- **The screenshot harness needed a longer per-page timeout.** Rendering a phone-sized
+  page with live `backdrop-filter` blur on software GL takes longer than 6 s on a small
+  machine, so `node tests/screenshots.js` died on the first frame. It is 20 s now, and
+  the render is reproducible: every frame matches the committed PNG byte for byte.
+
+**Reported, not patched** (each would change the approved design or needs your decision)
+
+- **`will-change: transform` is still on every bubble** (300 compositor layers on a
+  300-message thread). Removing it would cut GPU memory, but it could change how the
+  depth repaints on a low-end phone — still waiting on your sign-off.
+- **A very long conversation is still rendered in full.** The per-frame cost is now
+  proportional to what is on screen, but the first paint of 300 messages is still
+  ~100 ms of layout. A windowed list (or a *load earlier* affordance) would fix it and
+  changes what is on screen.
+- **The Bounce-strength label still reads "6/10" if you drag the slider while the
+  bounce toggle is off** — the toggle itself correctly says *Off*, the label does not.
+- **An empty provider read still leaves the thread screen up.** That is deliberate (see
+  above): closing the chat on a hiccup would be worse than showing it a moment longer.
+- **The signing key is not in the repository**, so this APK will not install over 2.12
+  in place: uninstall the old build first (see *Download & install*).
 
 ## What's new in 2.12 — the sheet that closed itself
 

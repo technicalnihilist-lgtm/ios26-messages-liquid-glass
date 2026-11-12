@@ -206,16 +206,34 @@ function loadThreads(){if(!BR)return false;try{
     the next send drew the snippet back as a phantom received bubble. */
  if(sig2===lastSig)return false;
  lastSig=sig2;
+ /* The open chat is rebuilt from the store like every other row, and a store
+    row only carries the one-line snippet - the real messages live in memory.
+    Replacing T[cur].m with that snippet left the screen showing every bubble
+    while the array behind it held a single fake one, so the next long-press
+    found a different message at that index and deleted the wrong text. Every
+    caller reloads the chat straight after this, so it only bit when that reload
+    failed (a bridge hiccup) - keep the array instead of trusting the caller. */
+ const openM=(cur!==null&&T[cur])?T[cur].m:null;
  T.length=0;
  arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),d:t.date,u:t.unread>0,m:[{x:t.snippet||''}]}));
  local.forEach(t=>T.push(t));
+ let gone=false;
  if(cur!==null){let k=-1;
   if(openId&&openId>0)k=T.findIndex(x=>x.id===openId);
   /* the provider can hand the same conversation back with the number written
      differently ("+91 98765 43210" vs "+919876543210"): an exact compare here
      dropped cur and the open chat vanished on the next poll */
   if(k<0&&openAddr)k=findThread(openAddr,0);
-  cur=k>=0?k:null}
+  if(k>=0){cur=k;if(openM)T[cur].m=openM}
+  else{
+   /* the conversation is not in the store any more (deleted in another app).
+      Leaving the thread screen up with cur=null stranded the user: stale
+      bubbles, a composer that silently did nothing, and the list still pushed
+      off-screen. Unwind it - but only when the store still lists conversations,
+      because an empty read is a provider hiccup, not a delete. */
+   cur=null;gone=arr.length>0}
+ }
+ if(gone){backThread();return true}
  renderRows();return true}catch(e){return false}}
 function loadMsgs(i){const t=T[i];if(!BR||!t)return;try{
  const arr=JSON.parse(BR.loadMessages(t.id||0,t.addr));
@@ -423,11 +441,14 @@ function parCache(){if(parBlobs)return;parBlobs=[...document.querySelectorAll('.
  parBlobLive=parBlobs.length&&parBlobs.every(b=>{const a=getComputedStyle(b).animationName;return !a||a==='none'})?1:0;
  try{barShiftOk=(window.CSS&&CSS.supports&&CSS.supports('transform','translate3d(1px,1px,0'))?1:0}catch(e){barShiftOk=1}}
 addEventListener('resize',()=>{parPhoneRect=null;geoReset()},{passive:true});
-// NOTE: the bar/blob parallax below is written exactly as it was approved. The bar
-// string is missing its closing paren and the blob transform is overridden by the
-// infinite drift animation, so neither actually moves - repairing either one slides
-// the bars and the wallpaper as you tilt the phone, which is a motion change the
-// design owner has to sign off on. Reported, not patched.
+// NOTE: the bar/blob parallax below is written exactly as it was approved.
+// Measured in the browser: the CSS parser closes the bar string's missing paren,
+// so the two bars DO slide with the pointer and the gyroscope (the value lands as
+// translate3d(6.3px,-1.8px,0)), while the wallpaper blobs do not - the infinite
+// drift animation owns their transform and overrides the inline one, which is why
+// parBlobLive turns their write off. Repairing the blob side would make the
+// wallpaper slide as you tilt the phone: a motion change the design owner has to
+// sign off on. Reported, not patched.
 function applyParallax(nx,ny){
  parX=nx;parY=ny;parCache();
  const amt=PAR_AMT;
@@ -469,8 +490,17 @@ function depthScroll(){
    Array(n) per frame was 300 allocations a frame on a long thread */
  const ks=dscKs;if(ks.length<n)ks.length=n;
  const g=depthGeo(bubs,sc);
+ /* Only the bubbles that can be seen need a pose. A bubble whose box is more
+    than half a viewport outside the scrollport is clipped away, and its
+    transform (a few tens of pixels of Z and Y) cannot pull it back in, so it
+    keeps whatever pose it already has and gets recomputed the moment it scrolls
+    into range. On a 300-message thread this takes the per-frame work from 300
+    bubbles to the ~25 on screen; the frame that draws it is identical. */
+ const lo=top-h*.5,hi=top+h*1.5;
  for(let i=0;i<n;i++){const q=g[i];
-   ks[i]=q?Math.min(1,Math.abs(q.t+q.h/2-top-mid)/h*1.6):-1}
+   if(!q){ks[i]=-1;continue}
+   const cy=q.t+q.h*.5;
+   ks[i]=(cy<lo||cy>hi)?-1:Math.min(1,Math.abs(cy-top-mid)/h*1.6)}
  /* a number beats a toFixed() string: this was two toFixed() calls per bubble
     on every frame, 600 of them on a 300-message thread */
  const sq=(s*1000)|0;
