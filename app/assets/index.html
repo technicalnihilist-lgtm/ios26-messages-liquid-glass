@@ -292,8 +292,16 @@ function threadSig(){const t=T[cur];if(!t)return'';
  const m=t.m||[],n=m.length,a=n?m[n-1]:null;
  return t.id+'|'+t.addr+'|'+t.c+'|'+t.n+'|'+t.t+'|'+n+'|'+(t.typing?1:0)+'|'+
    (a?((a.id||0)+':'+(a.d||0)+':'+(a.f||0)+':'+String(a.x==null?'':a.x).length):'')}
+/* A text that lands in the conversation you are reading is read. The store still
+   had it unread, so the row you were in grew an unread dot the moment you went
+   back - and it stayed until you opened that chat a second time. Clearing the
+   flag here also clears its notification (the native side does both). */
+function markOpenRead(){if(cur===null)return;const t=T[cur];if(!t||!t.u)return;
+ t.u=false;
+ if(BR)try{if(t.id||t.addr)BR.markRead(t.id||0,t.addr||'')}catch(e){}
+ renderRows()}
 /* reload the open conversation and re-render only if it actually differs */
-function refreshThread(){if(cur===null)return;loadMsgs(cur);if(threadSig()!==viewSig)renderThread(true)}
+function refreshThread(){if(cur===null)return;loadMsgs(cur);markOpenRead();if(threadSig()!==viewSig)renderThread(true)}
 function renderThread(keepScroll){const t=T[cur];if(!t)return;
  /* rebuilding the list under an open long-press menu replaces the bubble the
     menu is anchored to: the copy then floats over a duplicate of itself */
@@ -434,7 +442,7 @@ let parBlobs=null,parBars=null,parPhone=null,parPhoneRect=null;
    function), and a style write the cascade throws away still dirties style on
    every parallax frame. Decide once, at cache time, which of the two can ever
    apply, and skip the rest. */
-let parBlobLive=1,barShiftOk=1;
+let parBlobLive=1,barShiftOk=1,barShiftLast='';
 function parCache(){if(parBlobs)return;parBlobs=[...document.querySelectorAll('.blob')];
  parBars=[document.querySelector('#thread .bar'),document.querySelector('#list .bar')];
  parPhone=document.querySelector('.phone');
@@ -457,7 +465,14 @@ function applyParallax(nx,ny){
    b.style.transform=`translate3d(${(-nx*d).toFixed(1)}px,${(-ny*d).toFixed(1)}px,0)`});
  if(!barShiftOk)return;
  const shift=(9*D.par*2);
- parBars.forEach(el=>{if(el)el.style.transform=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0`});
+ /* A style write on a backdrop-filter bar makes the compositor re-blur the
+    wallpaper behind it, and the gyroscope feeds this on every frame even when
+    the handset is still. Skip the write when the pose is the same one that is
+    already applied; the value written is unchanged. */
+ const v=`translate3d(${(nx*shift).toFixed(1)}px,${(ny*shift*.5).toFixed(1)}px,0`;
+ if(v===barShiftLast)return;
+ barShiftLast=v;
+ parBars.forEach(el=>{if(el)el.style.transform=v});
 }
 let bubCache=null;
 function bubList(){if(!bubCache||!bubCache.length||!bubCache[0].isConnected)bubCache=[...document.querySelectorAll('#msgs .bub')];return bubCache}
@@ -523,6 +538,7 @@ function depthReset(){
    b.style.setProperty('--rx','0deg');b.style.setProperty('--ry','0deg');b.style.setProperty('--hl','0');b.style.setProperty('--ps','1')});
  document.querySelectorAll('.blob').forEach(b=>{b.style.transform='';b.style.translate=''});
  document.querySelectorAll('.bar').forEach(b=>{b.style.transform=''});
+ barShiftLast='';   // the bars were cleared by hand: the next pose must land
 }
 function setDepth(on){D.on=!!on;if(!D.on)depthReset();else depthScroll();
  const sw=$('#t3d');if(sw)sw.classList.toggle('on',D.on);
@@ -594,7 +610,9 @@ D.par=Math.max(0,Math.min(1,numPref('par',5)/10));D.tilt=Math.max(0,Math.min(1,n
 function bind(id,vid,fn,fmt){const r=$(id);const u=()=>{$(vid).textContent=fmt(+r.value);fn(+r.value)};r.oninput=u;u()}
 bind('#r1','#v1',v=>{R.style.setProperty('--ga',v/100);saveSoon()},v=>v+'%');
 bind('#r2','#v2',v=>{R.style.setProperty('--blur',v+'px');saveSoon()},v=>v+'px');
-bind('#r3','#v3',v=>{S.k=v/10;ease();saveSoon()},v=>v+'/10');
+/* the label has to agree with the toggle: with the bounce off the strength has
+   no effect, and dragging its slider used to print "8/10" under an Off switch */
+bind('#r3','#v3',v=>{S.k=v/10;ease();saveSoon()},v=>S.on?v+'/10':'Off');
 bind('#r4','#v4',v=>{S.sp=v/10;ease();saveSoon()},v=>v+'/10');
 $('#tb').classList.toggle('on',S.on);$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';
 $('#t3d').classList.toggle('on',D.on);

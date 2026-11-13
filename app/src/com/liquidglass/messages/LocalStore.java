@@ -36,6 +36,19 @@ final class LocalStore {
     private static final long DUP_MS = 5000L;
 
     /**
+     * Window in which a message counts as "the one that was deleted".
+     *
+     * A tombstone records the *date of the row that was deleted*, and a re-read of
+     * that same row carries exactly that date, so the window only has to absorb a
+     * provider that rounds the timestamp - it does not have to absorb time passing.
+     * It used to be three minutes, which meant deleting a text and then receiving
+     * the same words from the same person within three minutes silently swallowed
+     * the new one: the tombstone matched it and the message never appeared. That is
+     * the same bug DUP_MS above was shrunk for, on the delete side.
+     */
+    private static final long DEL_MS = 5000L;
+
+    /**
      * Tombstones indexed by address+body. Rebuilding this from JSON for every
      * message made loading a long thread quadratic; the index is built once and
      * thrown away whenever a new tombstone is written.
@@ -101,7 +114,7 @@ final class LocalStore {
                 JSONObject o = arr.optJSONObject(i);
                 if (o == null) continue;
                 if (addr.equals(o.optString("addr")) && body.equals(o.optString("body"))
-                        && Math.abs(when - o.optLong("date")) < 180000L) {
+                        && Math.abs(when - o.optLong("date")) < DEL_MS) {
                     return;
                 }
             }
@@ -149,7 +162,7 @@ final class LocalStore {
         long[] dates = delIndex(ctx).get(addr + '\u0000' + body);
         if (dates == null) return false;
         for (long d : dates) {
-            if (Math.abs(when - d) < 180000L) return true;
+            if (Math.abs(when - d) < DEL_MS) return true;
         }
         return false;
     }

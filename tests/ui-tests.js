@@ -37,11 +37,13 @@ const BASE = {
 const results = [];
 let failures = 0;
 
-// ONLY=<substring> runs just the matching tests - handy when chasing one failure
-const ONLY = process.env.ONLY || '';
+// ONLY=<substring>[,<substring>...] runs just the matching tests - handy when
+// chasing one failure, or when a slow machine cannot finish the whole suite
+// inside one call's time limit
+const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 
 async function test(name, fn) {
-  if (ONLY && name.indexOf(ONLY) < 0) return;
+  if (ONLY.length && !ONLY.some(s => name.indexOf(s) >= 0)) return;
   try {
     await fn();
     results.push(['PASS', name]);
@@ -106,6 +108,23 @@ async function open(_unused, cfg, opts) {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/*
+ * The thread pushes in with a CSS transition (~750 ms at the default bounce
+ * speed), and these long-press tests measure a bubble straight after the row
+ * tap. On a slow machine the bubble was still sliding when the coordinates were
+ * taken, so the press landed on a moving target and the menu never opened -
+ * which made the first delete test flake depending on how loaded the box was.
+ */
+async function threadSettled(p) {
+  await p.waitForFunction(() => {
+    const t = document.querySelector('#thread');
+    if (!t) return false;
+    const m = new DOMMatrix(getComputedStyle(t).transform).m41;
+    return Math.abs(m) < 0.5;
+  }, null, { timeout: 5000 });
+  await p.waitForTimeout(60);
+}
 
 (async () => {
   liveBrowser = await launchBrowser();
@@ -197,7 +216,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await test('long-press a bubble and delete it (tombstoned)', async () => {
     const p = await open();
     await p.click('#rows .row[data-i="0"]');
-    await p.waitForTimeout(450);
+    await threadSettled(p);
     const box = await p.$eval('#msgs .bub', el => {
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -249,7 +268,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await test('copy puts the bubble text on the clipboard', async () => {
     const p = await open();
     await p.click('#rows .row[data-i="0"]');
-    await p.waitForTimeout(450);
+    await threadSettled(p);
     const box = await p.$eval('#msgs .bub', el => {
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -638,6 +657,33 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await p.context().close();
   });
 
+  await test('a text that lands in the chat you are reading is read', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    // the store hands the conversation back with its unread flag set, exactly as
+    // it does after an SMS arrives in a chat that is on screen
+    await p.evaluate(() => {
+      const th = window.__mock.threads.find(t => t.id === 11);
+      th.unread = 1; th.snippet = 'you there?'; th.date = Date.now();
+      window.__mockPush('Aanya', 'you there?', 0);
+      window.__mockPersist();
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(500);
+    const shown = await p.$$eval('#msgs .bub', els => els.map(e => e.textContent.trim()));
+    assert(shown[shown.length - 1] === 'you there?', 'the new text did not appear: ' + JSON.stringify(shown));
+    const marks = await p.evaluate(() => window.__mockCalls('markRead').length);
+    assert(marks >= 2, 'the new message was never marked read: ' + marks + ' markRead calls');
+    assert(await p.evaluate(() => T[cur].u === false), 'the open chat is still flagged unread');
+    await p.click('#back');
+    await p.waitForTimeout(700);
+    const dots = await p.$$eval('#rows .row',
+      els => els.filter(e => /Aanya/.test(e.textContent) && e.querySelector('.dot')).length);
+    assert(dots === 0, 'the chat you just read came back with an unread dot');
+    await p.context().close();
+  });
+
   await test('an empty store read does not throw you out of the open chat', async () => {
     const p = await open();
     await p.click('#rows .row[data-i="0"]');
@@ -731,6 +777,27 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     assert(v.bounce === false, 'bounce flag not restored');
     assert(Math.abs(v.depth - 0.8) < 1e-6, 'depth not restored: ' + v.depth);
     assert(Math.abs(v.tilt - 0.9) < 1e-6, 'tilt not restored: ' + v.tilt);
+    await p.context().close();
+  });
+
+  await test('the bounce-strength label agrees with the toggle', async () => {
+    const p = await open();
+    await p.click('#edit');
+    await p.waitForTimeout(600);
+    assert(await p.$eval('#v3', e => e.textContent) === '6/10', 'strength label wrong on open');
+    await p.click('#tb');
+    await p.waitForTimeout(300);
+    assert(await p.$eval('#v3', e => e.textContent) === 'Off', 'turning bounce off left a number behind');
+    await p.evaluate(() => {
+      const r = document.querySelector('#r3');
+      r.value = 8; r.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await p.waitForTimeout(200);
+    assert(await p.$eval('#v3', e => e.textContent) === 'Off',
+      'dragging the strength slider while the bounce is off printed a number');
+    await p.click('#tb');
+    await p.waitForTimeout(300);
+    assert(await p.$eval('#v3', e => e.textContent) === '8/10', 'the strength label did not come back');
     await p.context().close();
   });
 
@@ -849,7 +916,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       msgs: { Aanya: MSGS_AANYA }
     });
     await p.click('#rows .row[data-i="0"]');
-    await p.waitForTimeout(600);
+    await threadSettled(p);
+    await p.waitForTimeout(200);
     const before = await p.$$eval('#msgs .bub', els => els.map(e => e.style.getPropertyValue('--bz')));
     const idx = before.reduce((best, v, i) => (parseFloat(v) > parseFloat(before[best]) ? i : best), 0);
     assert(parseFloat(before[idx]) > 0, 'no bubble had depth to lose: ' + JSON.stringify(before));

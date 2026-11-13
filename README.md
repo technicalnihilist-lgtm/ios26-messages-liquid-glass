@@ -37,7 +37,7 @@ No internet permission, no trackers, no libraries, ~77 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.13 (versionCode 18) |
+| Version | 2.14 (versionCode 19) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~77 KB |
@@ -155,7 +155,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 48 behavioural checks
+node tests/ui-tests.js            # 50 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -173,7 +173,60 @@ its country code — must never close the open chat or clone it. A notification 
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
 not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
-`ONLY=<substring> node tests/ui-tests.js` runs just the matching tests.
+`ONLY=<substring>[,<substring>] node tests/ui-tests.js` runs just the matching
+tests.
+
+## What's new in 2.14 — the unread dot that would not go away
+
+**Fixed**
+
+- **A text that arrived in the chat you were reading came back as unread.** The app
+  marks a conversation read when you *open* it, and the store was never told again —
+  so an SMS that landed while that conversation was on screen left the store's unread
+  flag set. The moment you went back, the row you had just read grew an unread dot,
+  and it stayed there until you opened that chat a second time. A message that arrives
+  in the conversation on screen is now marked read (and its notification cleared) as
+  soon as it lands, which is what the native side already does for an opened chat.
+- **Deleting a text could silently swallow the next one.** Tombstones matched a
+  deleted message on address + body inside a three-minute window. If the same person
+  sent the same words within three minutes of a delete — *"ok"*, a station name, an
+  OTP-style code — the new message matched the tombstone and never appeared: the
+  delete ate a message that had nothing to do with it. A tombstone records the exact
+  date of the row that was deleted, and a re-read of that same row carries exactly
+  that date, so the window only has to absorb a provider that rounds the timestamp
+  (5 s now, the same reasoning that shrank the duplicate window in 2.13). Messages
+  already deleted stay deleted.
+- **The Bounce-strength label disagreed with its own switch.** With the bounce off,
+  dragging the strength slider printed `8/10` under a toggle that said *Off*; the
+  label now reads *Off* until the bounce is back on.
+
+**Optimised**
+
+- **The parallax bars are not re-styled when their pose has not changed.** The
+  gyroscope reports on every frame even when the handset is lying still, and a style
+  write on a `backdrop-filter` bar makes the compositor re-blur the wallpaper behind
+  it. The value written is unchanged, so this is invisible: measured in the browser,
+  120 still-handset frames went from **120 style writes to 1**, and a moving handset
+  skips the frames that round to the pose already applied.
+
+**Harness**
+
+- **The long-press checks flaked on a loaded machine.** They measured the bubble
+  straight after tapping the row, while the thread was still sliding in (a 750 ms
+  transition), so the press landed on a moving target and the context menu never
+  opened. `threadSettled()` now waits for the push transition to finish. This was a
+  harness bug, not an app bug — the same test failed on 2.13's HTML when the box was
+  busy.
+- `ONLY=` takes a comma-separated list, so the suite can be run in chunks on a slow
+  machine, and it is **50 checks** now (the unread dot and the bounce label above are
+  both covered).
+
+**Unchanged on purpose** — the frames are byte-for-byte identical: all 14
+screenshots re-render to the same PNGs, and the whole UI, motion, glass and depth
+pass are untouched. Still open from 2.13, each waiting on your call: `will-change` on
+every bubble, a very long conversation still painted in full, the thread screen that
+stays up after an *empty* provider read, and the signing key (not in the repository,
+so this APK will not install over 2.13 in place — uninstall the old build first).
 
 ## What's new in 2.13 — the chat that forgot its own messages
 
