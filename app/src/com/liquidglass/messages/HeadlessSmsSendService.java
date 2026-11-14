@@ -46,6 +46,7 @@ public class HeadlessSmsSendService extends Service {
                                 v.put(Telephony.Sms.ADDRESS, addr);
                                 v.put(Telephony.Sms.BODY, text);
                                 v.put(Telephony.Sms.DATE, now);
+                                v.put(Telephony.Sms.DATE_SENT, now);
                                 v.put(Telephony.Sms.READ, 1);
                                 v.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT);
                                 stored = getContentResolver().insert(Telephony.Sms.CONTENT_URI, v);

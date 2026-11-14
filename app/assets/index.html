@@ -263,6 +263,14 @@ function pop(el){if(!S.on)return;const k=S.k;
 function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
 let rowsHtml='';
+/* Markup for one conversation row, memoised on the thread object. The cache key
+   carries the row index too: data-i is how a tap finds the conversation, and a
+   new message at the top of the list renumbers every row below it. */
+function rowHtml(t,i){const l=t.m[t.m.length-1]||{x:''};
+ const key=i+'\u0000'+t.n+'\u0000'+t.t+'\u0000'+(t.u?1:0)+'\u0000'+t.c+'\u0000'+(l.x==null?'':l.x);
+ if(t.__rk===key)return t.__rh;
+ t.__rk=key;
+ return t.__rh=`<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}
 function renderRows(){
  /* a poll can land while a conversation's long-press menu is open. Rebuilding
     #rows then replaced the very row the menu is anchored to: the floating copy
@@ -271,8 +279,16 @@ function renderRows(){
  if(X.g&&X.k==='row'){deferRows=true;return}
  deferRows=false;
  const q=$('#q').value.toLowerCase();
- const html=T.map((t,i)=>({t,i})).filter(o=>o.t.n.toLowerCase().includes(q)).map(({t,i})=>{const l=t.m[t.m.length-1]||{x:''};
- return `<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}).join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>';
+ /* one pass, and one cached string per row. Typing in the search field used to
+    allocate a {t,i} wrapper for every conversation, walk the list three times
+    and then run esc() + ini() + the name hash again for every match on every
+    keystroke. A row's markup only changes when its own fields do, so it is
+    built once and reused until something about that conversation moves. */
+ const out=[];
+ for(let i=0;i<T.length;i++){const t=T[i];
+  if(q&&t.n.toLowerCase().indexOf(q)<0)continue;
+  out.push(rowHtml(t,i))}
+ const html=out.join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>';
  /* the same markup is rebuilt on every poll and every keystroke: writing it back
     threw away every row node and every animation on it for nothing */
  if(html===rowsHtml)return;
@@ -720,6 +736,11 @@ function doDelete(){if(!X.g)return;const g=X.g,b=X.b,snap=X.msg,th=X.th,ci=cur;X
      list with the thread snippet: reload before re-rendering, or the thread
      collapses to a single bubble */
   if(deferRender){deferRender=false;if(ci2>=0)loadMsgs(ci2)}
+  /* the bubble was hidden so the floating copy could be measured over it.
+     closeCtx() is not part of this path, so nothing else puts it back: if the
+     re-render below is skipped (the reader left the chat mid-animation) the
+     node stayed invisible for good. */
+  if(b&&b.isConnected)b.style.visibility='';
   if(cur===ci2){renderThread();$('#tscroll').scrollTop=sc0}renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
   const cs=getComputedStyle(b);done(b.animate([{height:b.offsetHeight+'px',marginTop:cs.marginTop,paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',marginTop:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:220,easing:'ease-out',fill:'forwards'}),finish)};
@@ -772,7 +793,12 @@ function doRowDelete(){if(!X.g||X.k!=='row')return;const g=X.g,b=X.b,th=X.th||{}
   /* resolve the row the way the rest of the app does: a store that re-spelled
      the number would otherwise leave the deleted row on screen */
   const k=findThread(th.addr||'',th.id||0);
-  if(k>=0)T.splice(k,1);renderRows()};
+  if(k>=0)T.splice(k,1);
+  /* the row was hidden while its floating copy was measured; renderRows()
+     short-circuits when the markup it would write is the one already there, and
+     then nothing ever made this node visible again */
+  if(b&&b.isConnected)b.style.visibility='';
+  renderRows()};
  const collapse=()=>{if(!b||!b.isConnected||!S.on){finish();return}
   const cs=getComputedStyle(b);b.style.overflow='hidden';done(b.animate([{height:b.offsetHeight+'px',paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom},{height:'0px',paddingTop:'0px',paddingBottom:'0px'}],{duration:260,easing:'ease-out',fill:'forwards'}),finish)};
  const a=g.animate([{transform:'scale(1.03)',opacity:1},{transform:'scale(1.1)',opacity:1,offset:.25},{transform:'scale(.7) rotate(-4deg)',opacity:.6,offset:.65},{transform:'scale(0) rotate(6deg)',opacity:0}],{duration:S.on?460:200,easing:'ease-in',fill:'forwards'});

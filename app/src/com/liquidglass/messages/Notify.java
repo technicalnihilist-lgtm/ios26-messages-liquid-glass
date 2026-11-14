@@ -16,7 +16,15 @@ final class Notify {
 
     private Notify() {}
 
-    // both receivers can see the same text; never notify twice for one SMS
+    /**
+     * Both receivers can see the same text; never notify twice for one SMS.
+     *
+     * The two broadcasts arrive milliseconds apart, so the window only has to
+     * cover that. It was four seconds, which also swallowed a genuine repeat -
+     * the same sender sending the same words twice in a row produced one
+     * notification. (Same reasoning as LocalStore.DUP_MS and DEL_MS.)
+     */
+    private static final long DUP_NOTIFY_MS = 1500L;
     private static String lastKey;
     private static long lastAt;
     // creating a channel is idempotent but not free: do it once per process.
@@ -30,7 +38,7 @@ final class Notify {
         try {
             String key = (from == null ? "" : from) + '\u0000' + (body == null ? "" : body);
             long now = System.currentTimeMillis();
-            if (key.equals(lastKey) && now - lastAt < 4000L) return;
+            if (key.equals(lastKey) && now - lastAt < DUP_NOTIFY_MS) return;
             lastKey = key;
             lastAt = now;
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);

@@ -33,7 +33,7 @@ final class LocalStore {
      * this only has to absorb that. It used to be three minutes, which silently
      * swallowed a genuine repeat - texting "ok" twice in two minutes kept only one.
      */
-    private static final long DUP_MS = 5000L;
+    static final long DUP_MS = 5000L;
 
     /**
      * Window in which a message counts as "the one that was deleted".
@@ -104,25 +104,74 @@ final class LocalStore {
         } catch (Exception ignored) {}
     }
 
+    /** Is this exact row already recorded in the tombstone array? */
+    private static boolean alreadyTombstoned(JSONArray arr, String addr, String body, long when) {
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            if (addr.equals(o.optString("addr")) && body.equals(o.optString("body"))
+                    && Math.abs(when - o.optLong("date")) < DEL_MS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Remember a deletion so the message can never be merged back in. */
     static synchronized void tombstone(Context ctx, String addr, String body, long when) {
         if (addr == null || body == null) return;
         try {
             SharedPreferences p = prefs(ctx);
             JSONArray arr = new JSONArray(p.getString(DELETED, "[]"));
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject o = arr.optJSONObject(i);
-                if (o == null) continue;
-                if (addr.equals(o.optString("addr")) && body.equals(o.optString("body"))
-                        && Math.abs(when - o.optLong("date")) < DEL_MS) {
-                    return;
-                }
-            }
+            if (alreadyTombstoned(arr, addr, body, when)) return;
             JSONObject o = new JSONObject();
             o.put("addr", addr);
             o.put("body", body);
             o.put("date", when);
             arr.put(o);
+            while (arr.length() > 3000) arr.remove(0);
+            p.edit().putString(DELETED, arr.toString()).apply();
+            delIndex = null;
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Tombstone a whole conversation in one read and one write.
+     *
+     * Deleting a conversation used to call tombstone() once per message, and
+     * every one of those calls re-parsed the entire tombstone array (up to 3000
+     * entries) and committed it again - a 500-message thread meant 500 full
+     * parses and 500 SharedPreferences commits, all on the JS bridge thread,
+     * with the UI blocked waiting for the call to return. Rows are {addr, body,
+     * date} triples, exactly what tombstone() takes.
+     */
+    static synchronized void tombstoneAll(Context ctx, List<String[]> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        try {
+            SharedPreferences p = prefs(ctx);
+            JSONArray arr = new JSONArray(p.getString(DELETED, "[]"));
+            boolean changed = false;
+            for (int r = 0; r < rows.size(); r++) {
+                String[] row = rows.get(r);
+                if (row == null || row.length < 3) continue;
+                String addr = row[0];
+                String body = row[1];
+                if (addr == null || body == null) continue;
+                long when;
+                try {
+                    when = Long.parseLong(row[2]);
+                } catch (Exception e) {
+                    continue;
+                }
+                if (alreadyTombstoned(arr, addr, body, when)) continue;
+                JSONObject o = new JSONObject();
+                o.put("addr", addr);
+                o.put("body", body);
+                o.put("date", when);
+                arr.put(o);
+                changed = true;
+            }
+            if (!changed) return;
             while (arr.length() > 3000) arr.remove(0);
             p.edit().putString(DELETED, arr.toString()).apply();
             delIndex = null;

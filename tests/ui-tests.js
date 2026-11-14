@@ -951,6 +951,67 @@ async function threadSettled(p) {
     await p.context().close();
   });
 
+  await test('the row markup cache never changes what is drawn', async () => {
+    // renderRows() memoises each row's HTML on the thread object. The cache key
+    // has to cover everything that ends up in the markup - including data-i,
+    // which is how a tap finds the conversation and which moves whenever a new
+    // message pushes the list down.
+    const p = await open();
+    const fresh = await p.evaluate(() => {
+      const keep = [];
+      for (let i = 0; i < T.length; i++) { delete T[i].__rk; delete T[i].__rh; keep.push(rowHtml(T[i], i)); }
+      return keep;
+    });
+    const cached = await p.evaluate(() => {
+      const out = [];
+      for (let i = 0; i < T.length; i++) out.push(rowHtml(T[i], i));
+      return out;
+    });
+    assert(JSON.stringify(fresh) === JSON.stringify(cached), 'cached row markup differs from a fresh build');
+    // a new message at the top renumbers every row: the cached strings must move too
+    await p.evaluate(() => {
+      window.__mock.threads.push({ id: 77, addr: 'Zoya', snippet: 'newest', date: Date.now(), unread: 1 });
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(250);
+    const idx = await p.$$eval('#rows .row', els => els.map(e => e.dataset.i));
+    assert(idx.join(',') === '0,1,2,3', 'row indexes are stale after a poll: ' + idx.join(','));
+    const names = await p.$$eval('#rows .row .rt b', els => els.map(e => e.textContent.replace(/\d.*/, '')));
+    assert(names[0] === 'Zoya', 'new conversation not first: ' + JSON.stringify(names));
+    await p.click('#rows .row[data-i="3"]');
+    await p.waitForTimeout(700);
+    const title = await p.$eval('#ttl span', el => el.textContent);
+    assert(title === 'Mom', 'tap on a renumbered row opened ' + title);
+    assert(p.__errors.length === 0, 'console errors: ' + p.__errors.join(' | '));
+    await p.context().close();
+  });
+
+  await test('deleting a text and leaving the chat leaves no invisible bubble', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    const box = await p.$eval('#msgs .bub', el => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(600);
+    await p.mouse.up();
+    await p.waitForTimeout(450);
+    await p.click('#ctx .ci[data-a="del"]');
+    // walk out of the conversation while the bubble is still collapsing: the
+    // re-render that would have replaced the hidden node never runs
+    await p.waitForTimeout(130);
+    await p.evaluate(() => backThread());
+    await p.waitForTimeout(1400);
+    const hidden = await p.$$eval('#msgs .bub, #rows .row', els =>
+      els.filter(e => e.style.visibility === 'hidden').length);
+    assert(hidden === 0, hidden + ' node(s) left with visibility:hidden');
+    assert(p.__errors.length === 0, 'console errors: ' + p.__errors.join(' | '));
+    await p.context().close();
+  });
+
   await test('search filters the list', async () => {
     const p = await open();
     await p.fill('#q', 'roh');

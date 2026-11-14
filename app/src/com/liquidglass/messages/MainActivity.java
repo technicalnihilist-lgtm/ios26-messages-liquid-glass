@@ -183,7 +183,16 @@ public class MainActivity extends Activity {
             try { unregisterReceiver(smsChanged); } catch (Exception ignored) {}
         }
         if (web != null) {
+            // a WebView that is still attached to the window when it is
+            // destroyed keeps its whole renderer (and this Bridge, and through
+            // it the Activity) alive: detach it first, then drop the interface
+            try { web.removeJavascriptInterface("Android"); } catch (Exception ignored) {}
+            try { web.stopLoading(); } catch (Exception ignored) {}
             web.loadUrl("about:blank");
+            try {
+                ViewGroup parent = (ViewGroup) web.getParent();
+                if (parent != null) parent.removeView(web);
+            } catch (Exception ignored) {}
             web.destroy();
             web = null;
         }
@@ -554,11 +563,13 @@ public class MainActivity extends Activity {
 
         // our own copies (they also cover the "not the default app yet" case)
         try {
-            // body -> dates already in the thread. The old nested loop compared
-            // every stored message with every provider row on each poll.
+            // body+direction -> dates already in the thread. The old nested loop
+            // compared every stored message with every provider row on each poll.
+            // The direction is part of the key: an outgoing copy of "ok" was
+            // matched against an incoming "ok" and thrown away.
             Map<String, List<Long>> seenBody = new java.util.HashMap<>();
             for (JSONObject o : all) {
-                String b = o.optString("body");
+                String b = o.optString("body") + '\u0000' + o.optInt("out", 0);
                 List<Long> dates = seenBody.get(b);
                 if (dates == null) { dates = new ArrayList<>(); seenBody.put(b, dates); }
                 dates.add(o.optLong("date"));
@@ -572,11 +583,17 @@ public class MainActivity extends Activity {
                 String laddr = m.optString("addr");
                 if (laddr.isEmpty()) laddr = addr;
                 if (LocalStore.isDeleted(this, laddr, body, when)) continue;
+                int mout = m.optInt("out", 0);
                 boolean dup = false;
-                List<Long> dates = seenBody.get(body);
+                List<Long> dates = seenBody.get(body + '\u0000' + mout);
                 if (dates != null) {
+                    // the window only has to absorb the provider rounding the
+                    // timestamp of the row we wrote ourselves - it is not there
+                    // to absorb time passing. At three minutes it swallowed a
+                    // genuine repeat: text "ok", lose the default-SMS role, text
+                    // "ok" again, and the second bubble never appeared.
                     for (int d = 0; d < dates.size(); d++) {
-                        if (Math.abs(when - dates.get(d)) < 180000L) { dup = true; break; }
+                        if (Math.abs(when - dates.get(d)) < LocalStore.DUP_MS) { dup = true; break; }
                     }
                 }
                 if (dup) continue;
@@ -584,7 +601,7 @@ public class MainActivity extends Activity {
                 o.put("id", 0);
                 o.put("body", body);
                 o.put("date", when);
-                o.put("out", m.optInt("out", 0));
+                o.put("out", mout);
                 all.add(o);
             }
         } catch (Exception ignored) {}
@@ -652,6 +669,9 @@ public class MainActivity extends Activity {
                 v.put(Telephony.Sms.ADDRESS, addr);
                 v.put(Telephony.Sms.BODY, body);
                 v.put(Telephony.Sms.DATE, now);
+                // the incoming path writes both dates; without DATE_SENT the
+                // provider's sent folder has no time to sort the row by
+                v.put(Telephony.Sms.DATE_SENT, now);
                 v.put(Telephony.Sms.READ, 1);
                 v.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT);
                 stored = getContentResolver().insert(Telephony.Sms.CONTENT_URI, v);
@@ -673,13 +693,16 @@ public class MainActivity extends Activity {
                 // sweep left the other spelling behind, and the deleted chat
                 // came straight back on the next poll.
                 JSONArray local = LocalStore.forAddressLike(this, addr);
+                List<String[]> rows = new ArrayList<>();
                 for (int i = 0; i < local.length(); i++) {
                     JSONObject m = local.optJSONObject(i);
                     if (m == null) continue;
                     String maddr = m.optString("addr");
                     if (maddr.isEmpty()) maddr = addr;
-                    LocalStore.tombstone(this, maddr, m.optString("body"), m.optLong("date"));
+                    rows.add(new String[]{maddr, m.optString("body"), String.valueOf(m.optLong("date"))});
                 }
+                // one tombstone write for the whole conversation, not one per message
+                LocalStore.tombstoneAll(this, rows);
             } catch (Exception ignored) {}
             LocalStore.removeAddressLike(this, addr);
             return;
@@ -714,13 +737,18 @@ public class MainActivity extends Activity {
 
     /** Tombstone every message we know about in this thread before removing it. */
     private void tombstoneThread(long threadId, String addr) {
+        // collected first, written once: tombstone() re-reads and rewrites the
+        // whole tombstone array, so doing it per message made deleting a long
+        // conversation quadratic (and it runs on the JS bridge thread, with the
+        // page blocked waiting for deleteThread to return)
+        List<String[]> rows = new ArrayList<>();
         try {
             Cursor c = getContentResolver().query(Telephony.Sms.CONTENT_URI,
                     new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
                     Telephony.Sms.THREAD_ID + "=?", new String[]{String.valueOf(threadId)}, null);
             if (c != null) {
                 while (c.moveToNext()) {
-                    LocalStore.tombstone(this, c.getString(0), c.getString(1), c.getLong(2));
+                    rows.add(new String[]{c.getString(0), c.getString(1), String.valueOf(c.getLong(2))});
                 }
                 c.close();
             }
@@ -732,9 +760,10 @@ public class MainActivity extends Activity {
                 if (m == null) continue;
                 String maddr = m.optString("addr");
                 if (maddr.isEmpty()) maddr = addr;
-                LocalStore.tombstone(this, maddr, m.optString("body"), m.optLong("date"));
+                rows.add(new String[]{maddr, m.optString("body"), String.valueOf(m.optLong("date"))});
             }
         } catch (Exception ignored) {}
+        LocalStore.tombstoneAll(this, rows);
     }
 
     // ------------------------------------------------------------------ bridge

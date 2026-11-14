@@ -37,7 +37,7 @@ No internet permission, no trackers, no libraries, ~77 KB APK.
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.14 (versionCode 19) |
+| Version | 2.15 (versionCode 20) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~77 KB |
@@ -155,7 +155,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 50 behavioural checks
+node tests/ui-tests.js            # 52 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -171,10 +171,76 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring>[,<substring>] node tests/ui-tests.js` runs just the matching
 tests.
+
+## What's new in 2.15 — the text that vanished, the delete that stalled
+
+**Fixed**
+
+- **A text you sent could disappear from its own conversation.** When the phone's
+  SMS store refuses our write (you have not granted the default-SMS role yet) the
+  app keeps its own copy of the outgoing text, and the thread is rebuilt from both
+  sources with a duplicate check. That check matched on the *text* and a **three
+  minute** window — and it ignored which way the message went. So an outgoing
+  *"ok"* was matched against an incoming *"ok"* from up to three minutes earlier,
+  and the bubble you had just sent was dropped on the next poll. It now compares
+  direction as well, and the window is 5 s: the only thing it has to absorb is the
+  store rounding the timestamp of the row we wrote ourselves, exactly the reasoning
+  that shrank the duplicate and tombstone windows in 2.13 and 2.14.
+- **Deleting a long conversation froze the app.** Every message in the thread was
+  tombstoned with its own call, and each call re-read and rewrote the *entire*
+  tombstone list (up to 3000 entries) — a 500-message thread meant 500 full parses
+  and 500 preference commits, on the bridge thread, with the page blocked waiting
+  for the call to return. The rows are collected first and written in one go now.
+- **Closing the app leaked its renderer.** The WebView was destroyed while it was
+  still attached to the window, which keeps the renderer process, the JavaScript
+  bridge and (through it) the Activity alive. It is detached and its bridge removed
+  before `destroy()`.
+- **A notification could be swallowed.** The "never notify twice for one SMS" guard
+  — there to absorb the two broadcasts that can both fire for a single text — held
+  for four seconds, so the same sender sending the same words twice in a row
+  produced one notification. The two broadcasts arrive milliseconds apart; the
+  window is 1.5 s.
+- **A deleted bubble could stay invisible for good.** Long-press hides the real
+  bubble while the floating copy is measured over it, and the copy's path is the one
+  that puts it back. Delete a text and leave the chat before the collapse animation
+  ends and the re-render that would have replaced the node never ran: the bubble
+  stayed `visibility:hidden` in the DOM. The delete paths now restore it themselves.
+- **Sent texts had no `DATE_SENT`.** The incoming path writes both dates; the
+  outgoing one only wrote `DATE`, so a sent row had no time for another SMS app (or
+  the provider's sent folder) to sort by.
+
+**Optimised**
+
+- **The conversation list is built once per row, not once per keystroke.** Typing in
+  the search field rebuilt every row from scratch: an intermediate `{thread, index}`
+  object per conversation, three passes over the list, and `esc()` + `ini()` + the
+  name hash again for every match — on every letter. Each row's markup is now
+  memoised on the thread object and reused until something about that conversation
+  actually moves (the cache key carries the row index, because a new message at the
+  top renumbers every row below it). Measured with 300 conversations: the markup
+  build went from **2.9 ms to 1.5 ms** per render. The rest of `renderRows()` is the
+  `innerHTML` re-parse of ~62 KB (~14 ms), which this does not touch — see below.
+
+**Harness**
+
+- Two new checks, **52** in total: the row-markup cache must never change what is
+  drawn (a new message renumbers every row, and a tap must still open the
+  conversation it points at), and deleting a text and leaving the chat must leave no
+  node behind with `visibility:hidden`. Both fail on 2.14's HTML.
+
+**Unchanged on purpose** — the frames are byte-for-byte identical: all 14
+screenshots re-render to the same PNGs, and the UI, motion, glass and depth pass are
+untouched. Still open, each waiting on your call: `will-change` on every bubble, a
+very long conversation still painted in full, the thread screen that stays up after
+an *empty* provider read, and the signing key (not in the repository, so this APK
+will not install over 2.14 in place — uninstall the old build first). New this
+release: replacing the list with a keyed diff instead of a full `innerHTML` write
+would take the remaining ~14 ms out of a search keystroke, but it rewrites the row
+plumbing the long-press menu is anchored to, so it is reported rather than shipped.
 
 ## What's new in 2.14 — the unread dot that would not go away
 
