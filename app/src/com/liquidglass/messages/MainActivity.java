@@ -315,11 +315,15 @@ public class MainActivity extends Activity {
         Cursor c = null;
         Map<String, JSONObject> seen = new LinkedHashMap<>();
         try {
+            // no LIMIT in the sort order: the contacts provider appends its own
+            // and some builds reject a second one, which threw here and was
+            // swallowed - the contacts sheet then said "access is off" even with
+            // READ_CONTACTS granted. The 1000-row cap is in the loop below.
             c = getContentResolver().query(
                     ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                     new String[]{ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
                             ContactsContract.CommonDataKinds.Phone.NUMBER},
-                    null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC LIMIT 1000");
+                    null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
             if (c != null) {
                 while (c.moveToNext() && seen.size() < 1000) {
                     String name = c.getString(0);
@@ -717,18 +721,21 @@ public class MainActivity extends Activity {
     private void deleteMessage(long id) {
         if (id <= 0) return;
         // remember what we are deleting, so the backup store cannot bring it back
+        Cursor c = null;
         try {
-            Cursor c = getContentResolver().query(
+            c = getContentResolver().query(
                     Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, String.valueOf(id)),
                     new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
                     null, null, null);
-            if (c != null) {
-                if (c.moveToFirst()) {
-                    LocalStore.tombstone(this, c.getString(0), c.getString(1), c.getLong(2));
-                }
-                c.close();
+            if (c != null && c.moveToFirst()) {
+                LocalStore.tombstone(this, c.getString(0), c.getString(1), c.getLong(2));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            // close() used to sit inside the try, so a provider that threw
+            // between the query and the read leaked the cursor
+            if (c != null) try { c.close(); } catch (Exception ignored) {}
+        }
         try {
             getContentResolver().delete(Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, String.valueOf(id)),
                     null, null);

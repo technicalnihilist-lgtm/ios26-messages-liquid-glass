@@ -97,7 +97,7 @@ If you like our work, you can support us with a donation. We are bringing this v
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.15 (versionCode 20) |
+| Version | 2.16 (versionCode 21) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~77 KB |
@@ -215,7 +215,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 52 behavioural checks
+node tests/ui-tests.js            # 55 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -231,10 +231,79 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring>[,<substring>] node tests/ui-tests.js` runs just the matching
 tests.
+
+## What's new in 2.16 — the chat that only half-repainted
+
+**Fixed**
+
+- **A text deleted from the middle of a conversation stayed on screen.** The app only
+  re-read the open chat when the *conversation list* moved, and a list row is just a
+  snippet and a date — the newest text. Delete an older text in another SMS app and
+  neither changes, so the poll returned early and the chat kept showing a text that no
+  longer exists. The open chat is re-read on every poll now; a poll that really changed
+  nothing still repaints nothing, because the signature is compared before anything is
+  written.
+- **The screen and the messages behind it could drift apart.** That same check
+  (`threadSig`) looked only at the message *count* and the *last* bubble. One text gone
+  and one text added in the same read leaves both identical while the middle has moved,
+  so nothing repainted: the bubbles on screen no longer lined up with the array behind
+  them, and the next long-press deleted a different text than the one under your
+  finger. The signature now folds in every message (id, date, direction and text), one
+  multiply-add each — about 0.02 ms on a 300-message thread.
+- **One settings change froze the theme for good.** The theme was written to the store
+  as a resolved `light`/`dark` value on every save, so moving *any* slider turned
+  "follow the phone" into a fixed choice — the app stopped following the system from
+  then on. It is only stored once you actually pick a side now, and while it is left to
+  the phone the switch keeps up with the system instead of showing a stale position.
+- **One malformed row could empty the conversation list.** The list was emptied and
+  refilled row by row, so a store row with a null address (or a snippet that is not a
+  string) threw halfway through the rebuild: the error was swallowed and the list was
+  left truncated, with the open chat pointing past its end. The rows are built into a
+  fresh array and swapped in at the end, and the avatar colour/initial helpers now
+  accept a non-string.
+- **Contacts could come back empty with the permission granted.** The contacts query
+  carried `LIMIT 1000` inside its sort order. The contacts provider appends its own
+  limit, and the builds that reject a second one threw — into a silent `catch` — so the
+  sheet said "Contacts access is off" while `READ_CONTACTS` was held. The cap is in the
+  loop, where it already was.
+- **Deleting a text could leak a cursor.** `deleteMessage()` closed its cursor inside
+  the `try`; a provider that threw between the query and the read left it open. It is in
+  a `finally` now.
+- **Two conversations could share one notification.** The per-conversation notification
+  id used 16 bits of the address hash; the second sender's notification replaced the
+  first. It uses 24 bits.
+
+**Optimised**
+
+- **An incoming text no longer repaints the conversation.** Every poll that brought a
+  new text rebuilt all of `#msgs` with `innerHTML`, throwing away every bubble node —
+  its depth pose, its press state, any animation on it — to add one line at the end.
+  When nothing but the tail has changed, only the new bubbles are written. On a
+  300-message thread, one incoming text went from **22.8 ms to 2.2 ms** (median, 8
+  runs), and a whole poll-with-new-text from **19.9 ms to 5.6 ms**. The markup produced
+  is exactly what a full rebuild writes — the harness checks that the nodes already on
+  screen survive *and* that the result matches a full rebuild.
+
+**Harness**
+
+- Three new checks, **55** in total: a slider must leave the theme following the phone,
+  an incoming text must be appended rather than repainted (node identity *and* markup),
+  and a text swapped in the middle of a conversation must reach the screen. All three
+  fail on 2.15's HTML.
+
+**Unchanged on purpose** — all 14 screenshots re-render to the same PNGs byte for byte,
+so the UI, layout, colours, fonts, glass and depth pass are untouched. Still open, each
+waiting on your call: `will-change` on every bubble, a very long conversation still
+painted in full the first time it opens, the thread screen that stays up after an
+*empty* provider read, and the signing key (not in the repository, so this APK will not
+install over 2.15 in place — uninstall the old build first). New this release: the
+wallpaper-blob half of the parallax is still written and still discarded by the CSS
+parser (the drift animation owns the transform) — repairing it would make the wallpaper
+slide as you tilt the phone, which is a motion change that needs your sign-off.
 
 ## What's new in 2.15 — the text that vanished, the delete that stalled
 

@@ -173,8 +173,8 @@ function fmtTime(ms){if(!ms)return'';const d=new Date(ms),n=new Date();
  if(d.toDateString()===n.toDateString())return hm;
  const y=new Date(n.getTime()-86400000);if(d.toDateString()===y.toDateString())return 'Yesterday';
  return d.toLocaleDateString(undefined,{weekday:'short'})}
-function colorFor(s){let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
-function ini(s){const m=String(s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
+function colorFor(s){s=String(s==null?'':s);let h=7;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;h=(h^(h>>>13))>>>0;return PALETTE[h%PALETTE.length]}
+function ini(s){const m=String(s==null?'':s).replace(/[^0-9A-Za-z]/g,'');return m?m[0].toUpperCase():'#'}
 const ESCMAP={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'};
 /* one pass instead of four: this runs for every bubble, row and contact on
    every render, and a body with no special character now costs one scan */
@@ -214,9 +214,14 @@ function loadThreads(){if(!BR)return false;try{
     caller reloads the chat straight after this, so it only bit when that reload
     failed (a bridge hiccup) - keep the array instead of trusting the caller. */
  const openM=(cur!==null&&T[cur])?T[cur].m:null;
+ /* built into a fresh array and swapped in at the end. T was emptied first and
+    refilled row by row, so one malformed row from the store (a null address, a
+    snippet that is not a string) threw halfway through: the catch above returned
+    false and left the list truncated, with cur pointing past its end. */
+ const next=arr.map(t=>({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),d:t.date,u:t.unread>0,m:[{x:t.snippet||''}]}));
+ local.forEach(t=>next.push(t));
  T.length=0;
- arr.forEach(t=>T.push({id:t.id,addr:t.addr,n:t.addr,c:colorFor(t.addr),t:fmtTime(t.date),d:t.date,u:t.unread>0,m:[{x:t.snippet||''}]}));
- local.forEach(t=>T.push(t));
+ for(let i=0;i<next.length;i++)T.push(next[i]);
  let gone=false;
  if(cur!==null){let k=-1;
   if(openId&&openId>0)k=T.findIndex(x=>x.id===openId);
@@ -305,9 +310,17 @@ function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.d||Date.now(),d=
    nothing used to rebuild every bubble in the conversation anyway. */
 let viewSig='';
 function threadSig(){const t=T[cur];if(!t)return'';
- const m=t.m||[],n=m.length,a=n?m[n-1]:null;
- return t.id+'|'+t.addr+'|'+t.c+'|'+t.n+'|'+t.t+'|'+n+'|'+(t.typing?1:0)+'|'+
-   (a?((a.id||0)+':'+(a.d||0)+':'+(a.f||0)+':'+String(a.x==null?'':a.x).length):'')}
+ const m=t.m||[],n=m.length;
+ /* the whole list is folded in, not just its last row. A poll that replaced a
+    message in the middle (deleted in another app, or one gone and one added in
+    the same read) left the count and the tail identical, so nothing repainted:
+    the screen kept the old bubbles while the array behind them had moved, and
+    the next long-press then deleted a different text. One multiply-add per
+    message is ~0.02 ms on a 300-message thread. */
+ let h=0;
+ for(let i=0;i<n;i++){const m2=m[i],x=m2.x==null?'':String(m2.x);
+  h=(h*31+((m2.id|0)^((m2.d|0)|0)^((m2.f?1:0)*7)^(x.length*13)^((x.charCodeAt(0)|0)*3)^(x.charCodeAt(x.length-1)|0)))|0}
+ return t.id+'|'+t.addr+'|'+t.c+'|'+t.n+'|'+t.t+'|'+n+'|'+(t.typing?1:0)+'|'+h}
 /* A text that lands in the conversation you are reading is read. The store still
    had it unread, so the row you were in grew an unread dot the moment you went
    back - and it stayed until you opened that chat a second time. Clearing the
@@ -318,19 +331,50 @@ function markOpenRead(){if(cur===null)return;const t=T[cur];if(!t||!t.u)return;
  renderRows()}
 /* reload the open conversation and re-render only if it actually differs */
 function refreshThread(){if(cur===null)return;loadMsgs(cur);markOpenRead();if(threadSig()!==viewSig)renderThread(true)}
+/* what the thread DOM currently shows, and which conversation it belongs to.
+   The conversation is matched by id + address, not by object: loadThreads()
+   rebuilds T from the store whenever the list moves, so the thread object the
+   screen was drawn from is a different object from the one a poll hands us. */
+let shownM=null,shownKey=null;
+function threadKey(t){return t?(t.id||0)+'\u0000'+(t.addr||''):''}
+function bubHtml(m,i,gap){return `<div class="bub ${m.f?'me':'th'} ${gap?'gap':''}" data-i="${i}">${esc(m.x)}</div>`}
+/* is `next` exactly the list already on screen, with messages only appended? */
+function grewOnly(prev,next){if(!prev||next.length<=prev.length)return false;
+ for(let i=0;i<prev.length;i++){const a=prev[i],b=next[i];
+  if(!a||!b)return false;
+  if((a.id|0)!==(b.id|0)||(a.d|0)!==(b.d|0)||(a.f?1:0)!==(b.f?1:0)||a.x!==b.x)return false}
+ return true}
 function renderThread(keepScroll){const t=T[cur];if(!t)return;
  /* rebuilding the list under an open long-press menu replaces the bubble the
     menu is anchored to: the copy then floats over a duplicate of itself */
  if(X.g){deferRender=true;return}deferRender=false;
  bubCache=null;geoReset();
  const s=$('#tscroll'),prevTop=s.scrollTop,wasBottom=(s.scrollHeight-s.scrollTop-s.clientHeight)<48;
+ /* A text that arrives in the chat you are reading used to rebuild every bubble
+    in it: on a 300-message thread that is a full innerHTML re-parse (~25 ms) and
+    it throws away every node - its depth pose, its press state, any animation on
+    it - to add one line at the end. When nothing but the tail changed, write the
+    tail. The markup produced is byte-for-byte what the full path would write. */
+ if(keepScroll&&shownKey===threadKey(t)&&!t.typing&&grewOnly(shownM,t.m)){
+  const msgs=$('#msgs'),dl=msgs.querySelector('.dl');if(dl)dl.remove();
+  const add=t.m.slice(shownM.length);
+  let p=shownM.length?shownM[shownM.length-1].f:null,html='';
+  for(let j=0;j<add.length;j++){const m=add[j];html+=bubHtml(m,shownM.length+j,p!==null&&p!==m.f);p=m.f}
+  msgs.insertAdjacentHTML('beforeend',html);
+  if(t.m[t.m.length-1].f)msgs.insertAdjacentHTML('beforeend','<div class="dl">Delivered</div>');
+  shownM=t.m.slice();
+  viewSig=threadSig();
+  s.scrollTop=(keepScroll&&!wasBottom)?prevTop:s.scrollHeight;
+  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll);
+  return}
  $('#ttl').innerHTML=`<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><span>${esc(t.n)}</span>`;
  const out=[stampFor(t)];let p=null;
  for(let i=0;i<t.m.length;i++){const m=t.m[i];
-  out.push(`<div class="bub ${m.f?'me':'th'} ${p!==null&&p!==m.f?'gap':''}" data-i="${i}">${esc(m.x)}</div>`);p=m.f}
+  out.push(bubHtml(m,i,p!==null&&p!==m.f));p=m.f}
  if(t.m.length&&t.m[t.m.length-1].f&&!t.typing)out.push('<div class="dl">Delivered</div>');
  if(t.typing)out.push('<div class="bub th gap typing" style="width:62px"><i></i><i></i><i></i></div>');
  $('#msgs').innerHTML=out.join('');
+ shownM=t.m.slice();shownKey=threadKey(t);
  viewSig=threadSig();
  s.scrollTop=(keepScroll&&!wasBottom)?prevTop:s.scrollHeight;
  if(typeof depthScroll==='function')requestAnimationFrame(depthScroll)}
@@ -437,17 +481,31 @@ function prefSet(k,v){try{if(BR&&BR.setPref){BR.setPref(k,String(v));return}}cat
 let saveT=null,noSave=true;
 function saveSoon(){if(noSave)return;clearTimeout(saveT);saveT=setTimeout(saveCfg,300)}
 function saveCfg(){if(noSave)return;try{prefSet('ga',$('#r1').value);prefSet('blur',$('#r2').value);prefSet('k',$('#r3').value);
- prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);prefSet('theme',R.dataset.theme||'light');
+ prefSet('sp',$('#r4').value);prefSet('bounce',S.on?1:0);
+ /* the theme is only stored once it has been chosen: writing the resolved value
+    here turned "follow the phone" into a fixed choice on the first save */
+ prefSet('theme',themePref);
  prefSet('d3',D.on?1:0);prefSet('depth',$('#r5').value);
  prefSet('par',$('#r6').value);prefSet('tilt',$('#r7').value)}catch(e){}}
-function applyTheme(t){R.dataset.theme=t==='dark'?'dark':'light';const b=$('#td');if(b)b.classList.toggle('on',t==='dark')}
+/* '' means "follow the phone". data-theme is only written when the user has
+   actually picked a side: setting it at boot pinned the system theme, so the app
+   stopped following the phone the first time any setting was saved (see saveCfg) */
+let themePref='';
+function sysDark(){try{return matchMedia('(prefers-color-scheme:dark)').matches}catch(e){return false}}
+function applyTheme(t){themePref=t==='dark'?'dark':t==='light'?'light':'';
+ if(themePref)R.dataset.theme=themePref;else R.removeAttribute('data-theme');
+ const b=$('#td');if(b)b.classList.toggle('on',themePref?themePref==='dark':sysDark())}
+/* while the theme is left to the phone, the switch has to keep up with it */
+try{const mq=matchMedia('(prefers-color-scheme:dark)');
+ const onSys=()=>{if(!themePref)applyTheme('')};
+ if(mq.addEventListener)mq.addEventListener('change',onSys);else if(mq.addListener)mq.addListener(onSys)}catch(e){}
 /* a pref that is not a number (hand-edited store, a half-written value) used to
    turn the depth maths into NaN and push every bubble to "NaNpx" */
 function numPref(k,d){const v=+prefGet(k,d);return isFinite(v)?v:d}
 $('#r1').value=numPref('ga',28);$('#r2').value=numPref('blur',22);
 $('#r3').value=numPref('k',6);$('#r4').value=numPref('sp',5);
 S.on=prefGet('bounce','1')==='1';
-applyTheme(prefGet('theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
+applyTheme(prefGet('theme',''));
 // ================= 3D / 4D depth engine =================
 const D={on:true,strength:.5,par:.5,tilt:.6};
 const clamp1=v=>Math.max(-1,Math.min(1,v));
@@ -646,7 +704,7 @@ $('#r5').disabled=!D.on;
 $('#r3').onchange=$('#r4').onchange=()=>pop($('#tb').parentElement);
 $('#tb').onclick=function(){S.on=!S.on;this.classList.toggle('on',S.on);ease();$('#v3').textContent=S.on?$('#r3').value+'/10':'Off';saveCfg()};
 noSave=false;
-$('#td').onclick=function(){const d=!this.classList.contains('on');applyTheme(d?'dark':'light');saveCfg()};
+$('#td').onclick=function(){applyTheme(themePref==='dark'?'light':themePref==='light'?'dark':(sysDark()?'light':'dark'));saveCfg()};
 // ===== Long-press menu, delete, water sound =====
 let AC,MG;
 function actx(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)();const cp=AC.createDynamicsCompressor();MG=AC.createGain();MG.gain.value=1.5;MG.connect(cp);cp.connect(AC.destination)}catch(e){}}
@@ -846,7 +904,14 @@ $('#clist').onclick=e=>{const r=e.target.closest('.row');if(!r)return;const num=
  closeSheets();setTimeout(()=>newChat(num),300)};
 window.__onContactsReady=function(){contactsCache=null;const sh=document.querySelector('#sContacts');if(sh&&sh.classList.contains('on'))renderContacts($('#cq').value)};
 window.__onSmsPoll=function(){if(!BR)return;try{
- if(!loadThreads())return;
+ /* the open chat is re-read even when the conversation list did not move. It
+    used to be skipped whenever the list's signature was unchanged, and that
+    signature is the thread's snippet and date: delete a text from the middle of
+    a conversation in another SMS app and nothing about the list changes, so the
+    chat you were reading kept showing the text that no longer exists. The
+    re-read costs one provider query; a poll that really changed nothing still
+    repaints nothing, because refreshThread() compares before it renders. */
+ loadThreads();
  refreshThread()
 }catch(e){}};
 window.__onSmsStatus=function(){const on=!!(BR&&BR.isDefaultSms());const el=$('#defState');if(el)el.textContent=on?'On':'Not set'};

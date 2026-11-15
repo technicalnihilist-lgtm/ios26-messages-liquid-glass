@@ -1049,6 +1049,91 @@ async function threadSettled(p) {
     await p.context().close();
   });
 
+  await test('a settings change leaves the theme following the phone', async () => {
+    const p = await open(null, Object.assign({}, BASE, { prefs: {} }), { dark: true });
+    assert(await p.evaluate(() => document.documentElement.getAttribute('data-theme')) === null,
+      'the first boot pinned a theme although none had been chosen');
+    assert(await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()) === '#000',
+      'the phone being dark did not reach the app');
+    await p.evaluate(() => {
+      const r = document.querySelector('#r1');
+      r.value = '40';
+      r.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await p.waitForTimeout(700);
+    const prefs = await p.evaluate(() => window.__mock.prefs);
+    assert(prefs.ga === '40', 'the slider was not saved: ' + JSON.stringify(prefs));
+    assert(prefs.theme === '', 'saving a slider pinned the system theme: ' + JSON.stringify(prefs.theme));
+    assert(await p.evaluate(() => document.documentElement.getAttribute('data-theme')) === null,
+      'a slider wrote a fixed theme');
+    await p.context().close();
+  });
+
+  await test('an incoming text is appended, not repainted', async () => {
+    const many = [];
+    for (let i = 0; i < 40; i++) many.push({ id: 100 + i, body: 'line ' + i, date: T938 + i * 60000, out: i % 2 });
+    const p = await open(null, {
+      threads: [{ id: 11, addr: 'Aanya', snippet: 'line 39', date: T938 + 39 * 60000, unread: 0 }],
+      msgs: { Aanya: many }
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    await p.evaluate(() => { document.querySelector('#msgs .bub').__mark = 'kept'; });
+    await p.evaluate(() => {
+      window.__mockPush('Aanya', 'one more', 0);
+      window.__mock.threads[0].snippet = 'one more';
+      window.__mock.threads[0].date = Date.now();
+      window.__onSmsPoll();
+    });
+    await p.waitForTimeout(400);
+    const r = await p.evaluate(() => {
+      const kept = document.querySelector('#msgs .bub').__mark || '';
+      const shape = () => [...document.querySelectorAll('#msgs *')].map(e => e.className + '|' + (e.dataset.i || '') + '|' + e.textContent);
+      const texts = [...document.querySelectorAll('#msgs .bub')].map(e => e.textContent.trim());
+      const idx = [...document.querySelectorAll('#msgs .bub')].map(e => +e.dataset.i);
+      const asAppended = shape();
+      renderThread();
+      return { kept, texts, idx, same: JSON.stringify(shape()) === JSON.stringify(asAppended) };
+    });
+    assert(r.kept === 'kept', 'the whole thread was rebuilt to add one line');
+    assert(r.texts.length === 41 && r.texts[40] === 'one more', 'the new text did not land: ' + r.texts.length);
+    assert(r.idx.every((v, i) => v === i), 'data-i went out of step: ' + JSON.stringify(r.idx.slice(-3)));
+    assert(r.same, 'the appended markup differs from a full rebuild');
+    await p.context().close();
+  });
+
+  await test('a text replaced in the middle repaints the open thread', async () => {
+    const three = [
+      { id: 1, body: 'first', date: T938, out: 0 },
+      { id: 2, body: 'second', date: T938 + 60000, out: 0 },
+      { id: 3, body: 'third', date: T938 + 120000, out: 0 }
+    ];
+    const p = await open(null, {
+      threads: [{ id: 11, addr: 'Aanya', snippet: 'third', date: T938 + 120000, unread: 0 }],
+      msgs: { Aanya: three }
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await p.waitForTimeout(500);
+    // the middle text was deleted in another SMS app and an older one surfaced
+    // below it: same count, same tail, same snippet - only the middle moved
+    await p.evaluate((base) => {
+      const list = window.__mock.msgs.Aanya;
+      list.splice(1, 1);
+      list.push({ id: 4, body: 'swapped in', date: base + 60000, out: 0 });
+      list.sort((a, b) => a.date - b.date);
+      window.__onSmsPoll();
+    }, T938);
+    await p.waitForTimeout(400);
+    const r = await p.evaluate(() => ({
+      dom: [...document.querySelectorAll('#msgs .bub')].map(e => e.textContent.trim()),
+      model: T[cur].m.map(m => m.x)
+    }));
+    assert(JSON.stringify(r.dom) === JSON.stringify(r.model),
+      'the screen and the messages behind it disagree: ' + JSON.stringify(r));
+    assert(r.dom[1] === 'swapped in', 'the middle of the thread never repainted: ' + JSON.stringify(r.dom));
+    await p.context().close();
+  });
+
   await test('a 300-message thread renders and scrolls within budget', async () => {
     const big = [];
     for (let i = 0; i < 300; i++) big.push({ id: 500 + i, body: 'bulk message number ' + i, date: T938 + i * 1000, out: i % 2 });

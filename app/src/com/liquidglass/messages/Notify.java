@@ -81,7 +81,10 @@ final class Notify {
      */
     static int idFor(String from) {
         int h = from == null ? 0 : from.hashCode();
-        return 0x4D530000 | (h & 0xffff);
+        // 16 bits of the hash collided often enough that two conversations could
+        // share one notification slot and the second replaced the first; 24 bits
+        // keeps the tag non-zero and in range for NotificationManager
+        return 0x4D000000 | (h & 0xffffff);
     }
 
     /** Reading a conversation in the app clears its notification. */
