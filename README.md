@@ -97,10 +97,10 @@ If you like our work, you can support us with a donation. We are bringing this v
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.16 (versionCode 21) |
+| Version | 2.17 (versionCode 22) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
-| Size | ~77 KB |
+| Size | ~81 KB |
 | Permissions | `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, notifications |
 | Internet | **not requested** — the app cannot reach the network at all |
 
@@ -215,13 +215,13 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 55 behavioural checks
+node tests/ui-tests.js            # 59 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
 `ui-tests.js` covers boot, opening a thread, sending, delete + tombstones, the
 poll/receive path, HTML escaping, settings persistence, the default-SMS flow, the
-hardware-back chain and the 3D depth engine, and times a 300-message thread. Many of
+hardware-back chain and the 3D depth engine, and times a 300-message thread and a 300-conversation list. Many of
 the checks are regressions from earlier releases: a poll must not drop a conversation
 you just composed, composing an existing number must not clone it, an incoming message
 must not rebuild the thread under an open long-press menu, pressing a bubble must not
@@ -231,10 +231,76 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. A store query that throws must leave the conversation list and the open chat exactly as they were (an empty *result* is still empty; a *failure* is not), and a conversation arriving at the top must patch the list rather than rebuild it — the rows below have to be moved, not re-created, `data-i` has to follow them, and a tap on a moved row must still open its own chat. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring>[,<substring>] node tests/ui-tests.js` runs just the matching
 tests.
+
+## What's new in 2.17 — the list that rebuilt itself for one row
+
+**Fixed**
+
+- **One failed SMS query could wipe the screen.** Both store readers swallow a provider
+  exception and return `[]`, and the page cannot tell that apart from a genuinely empty
+  phone: a single bad query repainted an empty *No Conversations* list over 300 real
+  conversations, or emptied the open chat down to its date stamp. They answer `null`
+  now — "I could not read it" — and the page keeps whatever it is already showing, the
+  same rule the store rebuild has used since 2.13. An empty *result* still counts as
+  empty; only a failure is ignored.
+- **A quick reply from the notification shade did not show up.** `HeadlessSmsSendService`
+  writes the text to the store but never told the page, so the reply you just sent from
+  the shade stayed invisible until the next 6-second poll. It broadcasts the same
+  "store changed" signal the in-app send path does.
+- **Deleting a conversation left its notification behind.** Tapping that notification
+  then opened a chat that no longer exists. Deleting the thread clears it, exactly like
+  reading it does.
+- **The no-bridge send path animated the wrong node.** The fallback reply path (a browser
+  without `window.Android`) picked its bubbles with `document.querySelectorAll('.bub.me')`.
+  The long-press menu's floating copy keeps that class and sits later in the document, so
+  `.pop()` returned the ghost and the pop-in ran on a node nobody was looking at. The
+  three lookups are scoped to `#msgs`.
+- **A typing bubble could outlive the message that replaced it.** The append-only
+  repaint removed the *Delivered* marker but not the three dots, so a thread that had one
+  could show the new text above dots that never went away. The append path clears both.
+- **A finished page resurrected a dead shell.** `onDestroy()` loads `about:blank` into
+  the WebView it is tearing down; that load finished afterwards and set `pageLoaded` back
+  to `true` on an activity with no view.
+
+**Optimised**
+
+- **The conversation list is patched, not re-parsed.** Any change to the list handed all
+  of `#rows` back to the HTML parser. That includes the commonest event in the app — a
+  text arriving — because the row index (`data-i`, how a tap finds its conversation) is
+  baked into the markup, so one new conversation at the top renumbered and re-parsed
+  every row below it. The index is now written onto the node instead of into the cached
+  string, and only the rows that really differ are created, moved or removed. On a
+  300-conversation store, one arrival went from **41.9 ms to 5.0 ms**, and the nodes
+  already on screen survive. The markup is byte-for-byte what the full rebuild writes,
+  and `data-i` is re-stamped on every row it walks, so taps and long-presses still land
+  on the conversation under your finger — including two conversations whose markup is
+  identical.
+- **The address book no longer recompiles a regex per contact.** `contactsJson()` ran
+  `number.replaceAll("[^0-9+]", "")` on every row of up to 1000 — a fresh `Pattern`
+  compile each time. It is compiled once.
+
+**Harness**
+
+- Four new checks, **59** in total: a failed thread query must not empty the list, a
+  failed message query must not blank the open chat, a new conversation on top must
+  patch the list (the rows below must be *moved*, not rebuilt, `data-i` must follow
+  them, and tapping a moved row must still open its own conversation), and a
+  300-conversation list must update for much less than a full rebuild. All four fail on
+  2.16.
+
+**Unchanged on purpose** — all 14 screenshots re-render to the same PNGs byte for byte,
+so the UI, layout, colours, fonts, glass and depth pass are untouched. Still open, each
+waiting on your call: `will-change` on every bubble (it cannot be dropped without
+touching the base `translate3d` that gives bubbles their layer, which is the 3D design),
+a very long conversation still painted in full the first time it opens, the thread
+screen that stays up after an *empty* provider read, the wallpaper-blob half of the
+parallax that the CSS parser still discards, and the signing key (still not in the
+repository, so this APK will not install over 2.16 in place — uninstall the old build
+first).
 
 ## What's new in 2.16 — the chat that only half-repainted
 

@@ -52,6 +52,12 @@ public class HeadlessSmsSendService extends Service {
                                 stored = getContentResolver().insert(Telephony.Sms.CONTENT_URI, v);
                             } catch (Exception ignored) {}
                             if (stored == null) LocalStore.addOut(this, addr, text, now);
+                            // tell the page straight away, exactly like the in-app
+                            // send path: without this a quick reply sat unseen for
+                            // up to a full 6-second poll
+                            Intent changed = new Intent(MainActivity.ACTION_SMS_CHANGED);
+                            changed.setPackage(getPackageName());
+                            sendBroadcast(changed);
                         }
                     }
                 }

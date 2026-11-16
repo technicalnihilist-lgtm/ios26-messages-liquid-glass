@@ -121,6 +121,10 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
+                // onDestroy() loads about:blank into the view it is tearing down;
+                // that finished *after* the activity was gone and put pageLoaded
+                // back to true on a dead shell
+                if (web == null || v != web) return;
                 pageLoaded = true;
                 flushPendingAddress();
                 pushStatus();
@@ -309,6 +313,9 @@ public class MainActivity extends Activity {
 
     // -------------------------------------------------------------- contacts
 
+    private static final java.util.regex.Pattern NON_DIGITS =
+            java.util.regex.Pattern.compile("[^0-9+]");
+
     private String contactsJson() {
         JSONArray out = new JSONArray();
         if (!hasContactsPermission()) return out.toString();
@@ -329,7 +336,9 @@ public class MainActivity extends Activity {
                     String name = c.getString(0);
                     String number = c.getString(1);
                     if (number == null || number.trim().isEmpty()) continue;
-                    String key = number.replaceAll("[^0-9+]", "");
+                    // one compiled pattern, not a fresh regex per contact row:
+                    // a 1000-row address book recompiled it 1000 times a sheet
+                    String key = NON_DIGITS.matcher(number).replaceAll("");
                     if (key.length() < 6 || seen.containsKey(key)) continue;
                     JSONObject o = new JSONObject();
                     o.put("name", name == null || name.trim().isEmpty() ? number : name);
@@ -403,6 +412,12 @@ public class MainActivity extends Activity {
         // the same comparison key the rest of the store uses.
         Map<String, Long> readAt = LocalStore.readMap(this);
         Map<String, Long> readNorm = normReadMap(readAt);
+        // a provider query that throws is not an empty phone. Returning the
+        // half-built list (or just our own copies) told the page every
+        // conversation had gone, and it repainted an empty Messages list over
+        // the real one. null says "I could not read it" and the page keeps what
+        // it already has.
+        boolean failed = false;
         Cursor c = null;
         try {
             c = getContentResolver().query(
@@ -444,6 +459,7 @@ public class MainActivity extends Activity {
                 }
             }
         } catch (Exception ignored) {
+            failed = true;
         } finally {
             if (c != null) c.close();
         }
@@ -493,6 +509,8 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
 
+        if (failed) return null;
+
         List<JSONObject> list = new ArrayList<>(seen.values());
         Collections.sort(list, new Comparator<JSONObject>() {
             @Override
@@ -533,6 +551,9 @@ public class MainActivity extends Activity {
             try { addr = addrForThread(threadId); } catch (Exception ignored) {}
         }
         List<JSONObject> all = new ArrayList<>();
+        // see threadsJson(): a query that threw must not look like a conversation
+        // with no messages, or one provider hiccup emptied the open chat on screen
+        boolean failed = false;
 
         if (threadId > 0) {
             Cursor c = null;
@@ -560,10 +581,12 @@ public class MainActivity extends Activity {
                     }
                 }
             } catch (Exception ignored) {
+                failed = true;
             } finally {
                 if (c != null) c.close();
             }
         }
+        if (failed) return null;
 
         // our own copies (they also cover the "not the default app yet" case)
         try {
@@ -688,6 +711,9 @@ public class MainActivity extends Activity {
     }
 
     private void deleteThread(long threadId, String addr) {
+        // a deleted conversation has nothing left to read: leaving its
+        // notification in the shade meant tapping it opened a chat that is gone
+        if (addr != null && !addr.isEmpty()) Notify.clear(this, addr);
         if (threadId <= 0) {
             // a conversation that only exists in our own store (or has no provider id yet)
             if (addr == null || addr.isEmpty()) return;

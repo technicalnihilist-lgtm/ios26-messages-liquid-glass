@@ -241,7 +241,13 @@ function loadThreads(){if(!BR)return false;try{
  if(gone){backThread();return true}
  renderRows();return true}catch(e){return false}}
 function loadMsgs(i){const t=T[i];if(!BR||!t)return;try{
- const arr=JSON.parse(BR.loadMessages(t.id||0,t.addr));
+ const raw=BR.loadMessages(t.id||0,t.addr);
+ /* the shell answers null when the provider query itself failed, which is not
+    the same thing as an empty conversation: keeping what is on screen beats
+    blanking the chat because one query threw */
+ if(raw==null||raw==='null')return;
+ const arr=JSON.parse(raw);
+ if(!Array.isArray(arr))return;
  t.m=arr.map(m=>({id:m.id,f:m.out?1:0,x:m.body,d:m.date}))}catch(e){}}
 let cur=null,busy=false;
 function ease(){const o=1+S.k*1.3;R.style.setProperty('--ease',`cubic-bezier(.3,${o.toFixed(2)},.5,1)`);R.style.setProperty('--dur',(0.9-S.sp*.6).toFixed(2)+'s');R.style.setProperty('--pd',S.on?(1-.14*S.k).toFixed(3):1)}
@@ -267,15 +273,40 @@ function pop(el){if(!S.on)return;const k=S.k;
  el.animate([{transform:base+sc(.6)},{transform:base+sc(1+.12*k),offset:.55},{transform:base+sc(1-.04*k),offset:.8},{transform:base+sc(1)}],{duration:(1.1-S.sp)*520,easing:'ease-out'})}
 function slide(el,x0){el.style.transition='none';el.style.transform=`translateX(${x0}%)`;el.offsetWidth;
  el.style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;el.style.transform='translateX(0)'}
-let rowsHtml='';
+const EMPTY_ROWS='<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>';
+let rowsHtml='',rowsIds='';
 /* Markup for one conversation row, memoised on the thread object. The cache key
-   carries the row index too: data-i is how a tap finds the conversation, and a
-   new message at the top of the list renumbers every row below it. */
-function rowHtml(t,i){const l=t.m[t.m.length-1]||{x:''};
- const key=i+'\u0000'+t.n+'\u0000'+t.t+'\u0000'+(t.u?1:0)+'\u0000'+t.c+'\u0000'+(l.x==null?'':l.x);
+   is the row's own content only: data-i is how a tap finds the conversation, and
+   a new message at the top of the list renumbers every row below it. Keeping the
+   index out of the key (and off the string) means one arrival at the top no
+   longer invalidates the cached markup of all 300 conversations below it. */
+function rowHtml(t){const l=t.m[t.m.length-1]||{x:''};
+ const key=t.n+'\u0000'+t.t+'\u0000'+(t.u?1:0)+'\u0000'+t.c+'\u0000'+(l.x==null?'':l.x);
  if(t.__rk===key)return t.__rh;
  t.__rk=key;
- return t.__rh=`<div class="row" data-i="${i}">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}
+ return t.__rh=`<div class="row">${t.u?'<i class="dot"></i>':''}<div class="av" style="background:${t.c}">${esc(ini(t.n))}</div><div class="rt"><b>${esc(t.n)}<small>${esc(t.t)}</small></b><p>${esc(l.x)}</p></div></div>`}
+function makeRow(html){const w=document.createElement('div');w.innerHTML=html;return w.firstElementChild}
+/* Put the wanted rows into #rows by moving what is already there, instead of
+   handing the whole list back to the HTML parser.
+   Writing innerHTML re-parsed every row on every change: on a 300-conversation
+   store one incoming text cost ~14 ms of parse (measured) for one inserted row,
+   and it threw away every node, its press state and any animation on it. The
+   markup written here is the same string the full path used to write; only the
+   nodes that really differ are created, and data-i is patched onto the rest. */
+function patchRows(want){
+ const box=$('#rows');let node=box.firstElementChild,i=0;
+ while(i<want.length){
+  const w=want[i];
+  if(node&&node.__rh===w){if(node.dataset.i!==''+i)node.dataset.i=i;node=node.nextElementSibling;i++;continue}
+  /* the wanted row may already exist further down (one conversation was
+     removed or moved): drop what is above it and keep the node */
+  let scan=node;while(scan&&scan.__rh!==w)scan=scan.nextElementSibling;
+  if(scan){while(node!==scan){const nx=node.nextElementSibling;node.remove();node=nx}
+   if(node.dataset.i!==''+i)node.dataset.i=i;node=node.nextElementSibling;i++;continue}
+  const el=makeRow(w);if(!el)break;
+  el.__rh=w;el.dataset.i=i;box.insertBefore(el,node);i++}
+ while(node){const nx=node.nextElementSibling;node.remove();node=nx}
+}
 function renderRows(){
  /* a poll can land while a conversation's long-press menu is open. Rebuilding
     #rows then replaced the very row the menu is anchored to: the floating copy
@@ -289,15 +320,22 @@ function renderRows(){
     and then run esc() + ini() + the name hash again for every match on every
     keystroke. A row's markup only changes when its own fields do, so it is
     built once and reused until something about that conversation moves. */
- const out=[];
+ const out=[],ids=[];
  for(let i=0;i<T.length;i++){const t=T[i];
   if(q&&t.n.toLowerCase().indexOf(q)<0)continue;
-  out.push(rowHtml(t,i))}
- const html=out.join('')||'<p style="text-align:center;color:var(--tx2);margin:40px 0">No Conversations</p>';
+  out.push(rowHtml(t));ids.push(t.id+'\u0000'+t.addr)}
+ /* the empty state is part of the compared markup: with it left out, the very
+    first render on an empty store matched the initial '' and never drew it */
+ const html=out.join('')||EMPTY_ROWS,idSig=ids.join('\u0001');
  /* the same markup is rebuilt on every poll and every keystroke: writing it back
-    threw away every row node and every animation on it for nothing */
- if(html===rowsHtml)return;
- rowsHtml=html;$('#rows').innerHTML=html}
+    threw away every row node and every animation on it for nothing. The identity
+    list is part of the comparison: two conversations can produce byte-identical
+    markup (same name, same snippet, same minute), and then only data-i tells them
+    apart - that still has to be rewritten. */
+ if(html===rowsHtml&&idSig===rowsIds)return;
+ rowsHtml=html;rowsIds=idSig;
+ if(!out.length){$('#rows').innerHTML=EMPTY_ROWS;return}
+ patchRows(out)}
 /* an empty conversation has no message to take a date from: use the thread's
    own date, not the clock, or the stamp changes every time the page opens */
 function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.d||Date.now(),d=new Date(ms),n=new Date();
@@ -357,6 +395,9 @@ function renderThread(keepScroll){const t=T[cur];if(!t)return;
     tail. The markup produced is byte-for-byte what the full path would write. */
  if(keepScroll&&shownKey===threadKey(t)&&!t.typing&&grewOnly(shownM,t.m)){
   const msgs=$('#msgs'),dl=msgs.querySelector('.dl');if(dl)dl.remove();
+  /* a typing bubble is not part of the message list: leaving one in place put
+     the new text above three dots that then never went away */
+  const ty=msgs.querySelector('.typing');if(ty)ty.remove();
   const add=t.m.slice(shownM.length);
   let p=shownM.length?shownM[shownM.length-1].f:null,html='';
   for(let j=0;j<add.length;j++){const m=add[j];html+=bubHtml(m,shownM.length+j,p!==null&&p!==m.f);p=m.f}
@@ -409,9 +450,12 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
   setTimeout(()=>{loadThreads();refreshThread();renderRows()},900);
   return}
  t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
- const b=[...document.querySelectorAll('.bub.me')].pop();if(b)pop(b);
- const ci=cur;t.typing=true;setTimeout(()=>{if(cur===ci){renderThread();const e=[...document.querySelectorAll('.typing')].pop();e&&pop(e)}},500);
- setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('.bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
+ /* scoped to #msgs: the long-press menu's floating copy keeps the .bub.me class
+    and lives later in the document, so an unscoped .pop() animated the ghost
+    instead of the bubble that had just been written */
+ const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
+ const ci=cur;t.typing=true;setTimeout(()=>{if(cur===ci){renderThread();const e=[...document.querySelectorAll('#msgs .typing')].pop();e&&pop(e)}},500);
+ setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('#msgs .bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
 /* A close animation outlives the sheet it is closing. Tapping Done and then the
    gear again inside those ~400ms opened the sheet and the *old* exit animation
    finished a moment later and took .on straight back off it: the sheet vanished

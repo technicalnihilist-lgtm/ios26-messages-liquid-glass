@@ -1134,6 +1134,81 @@ async function threadSettled(p) {
     await p.context().close();
   });
 
+  /*
+   * A provider query that throws is not an empty phone. Both readers answer
+   * null in that case, and the page has to keep what it is already showing -
+   * it used to repaint an empty Messages list, or blank the open chat, over a
+   * single failed query.
+   */
+  await test('a failed thread query keeps the conversation list', async () => {
+    const p = await open();
+    const before = await p.$$eval('#rows .row', els => els.length);
+    await p.evaluate(() => { window.Android.loadThreads = () => null; });
+    await p.evaluate(() => window.__onSmsPoll());
+    await p.waitForTimeout(400);
+    const after = await p.$$eval('#rows .row', els => els.length);
+    assert(after === before, 'a failed query emptied the list: ' + before + ' -> ' + after);
+    const empty = await p.$$eval('#rows', els => /No Conversations/.test(els[0].textContent));
+    assert(!empty, 'the list fell back to the empty state');
+    await p.context().close();
+  });
+
+  await test('a failed message query keeps the open chat', async () => {
+    const p = await open(null, {
+      threads: [{ id: 11, addr: 'Aanya', snippet: 'Let me check and tell you', date: T938 + 60000, unread: 0 }],
+      msgs: { Aanya: MSGS_AANYA }
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    const before = await p.$$eval('#msgs .bub', els => els.length);
+    await p.evaluate(() => { window.Android.loadMessages = () => null; });
+    await p.evaluate(() => window.__onSmsPoll());
+    await p.waitForTimeout(400);
+    const after = await p.$$eval('#msgs .bub', els => els.length);
+    assert(before === 2 && after === 2, 'a failed query blanked the chat: ' + before + ' -> ' + after);
+    await p.context().close();
+  });
+
+  /*
+   * The list is patched, not re-parsed: one arrival at the top must not rebuild
+   * every row below it, and data-i has to follow the rows that moved.
+   */
+  await test('a new conversation on top patches the list instead of rebuilding it', async () => {
+    const p = await open(null, {
+      threads: [
+        { id: 11, addr: 'Aanya', snippet: 'Let me check and tell you', date: T938, unread: 0 },
+        { id: 12, addr: 'Rohan', snippet: 'Okay done', date: T938 - 60000, unread: 0 }
+      ],
+      msgs: { Aanya: MSGS_AANYA, Rohan: [{ id: 21, body: 'Okay done', date: T938 - 60000, out: 0 }] }
+    });
+    await p.evaluate(() => {
+      document.querySelectorAll('#rows .row').forEach((r, i) => { r.dataset.keep = 'k' + i; });
+      window.__mock.threads.push({ id: 13, addr: 'Zoya', snippet: 'top of the pile', date: Date.now(), unread: 1 });
+    });
+    await p.evaluate(() => window.__onSmsPoll());
+    await p.waitForTimeout(500);
+    const r = await p.evaluate(() => {
+      const rows = [...document.querySelectorAll('#rows .row')];
+      return {
+        n: rows.length,
+        names: rows.map(e => e.querySelector('.rt b').firstChild.textContent),
+        kept: rows.map(e => e.dataset.keep || ''),
+        idx: rows.map(e => e.dataset.i)
+      };
+    });
+    assert(r.n === 3, 'expected three rows, got ' + r.n + ' :: ' + JSON.stringify(r.names));
+    assert(r.names[0] === 'Zoya', 'the new conversation is not on top: ' + JSON.stringify(r.names));
+    assert(r.kept[1] === 'k0' && r.kept[2] === 'k1',
+      'the rows below were rebuilt instead of moved: ' + JSON.stringify(r.kept));
+    assert(r.idx.join(',') === '0,1,2', 'data-i did not follow the rows: ' + JSON.stringify(r.idx));
+    // and the moved rows still open the conversation they belong to
+    await p.click('#rows .row[data-i="2"]');
+    await threadSettled(p);
+    const addr = await p.evaluate(() => cur !== null && T[cur].addr);
+    assert(addr === 'Rohan', 'tapping the moved row opened ' + addr);
+    await p.context().close();
+  });
+
   await test('a 300-message thread renders and scrolls within budget', async () => {
     const big = [];
     for (let i = 0; i < 300; i++) big.push({ id: 500 + i, body: 'bulk message number ' + i, date: T938 + i * 1000, out: i % 2 });
@@ -1154,6 +1229,38 @@ async function threadSettled(p) {
     });
     console.log('         depthScroll ' + scroll.toFixed(2) + 'ms/frame over 300 bubbles, render ' + t.toFixed(0) + 'ms');
     assert(scroll < 12, 'depthScroll too slow: ' + scroll.toFixed(2) + 'ms');
+    await p.context().close();
+  });
+
+  await test('a 300-conversation list updates without re-parsing every row', async () => {
+    const threads = [];
+    for (let i = 0; i < 300; i++) threads.push({ id: 100 + i, addr: 'Person ' + i, snippet: 'last line ' + i, date: T938 - i * 60000, unread: 0 });
+    const p = await open(null, { threads, msgs: {} });
+    const r = await p.evaluate(() => {
+      // a real cold build: empty #rows, nothing cached
+      const t0 = performance.now();
+      document.querySelector('#rows').innerHTML = '';
+      rowsHtml = ''; rowsIds = '';
+      renderRows();
+      const full = performance.now() - t0;
+      const first = document.querySelector('#rows .row');
+      // one arrival at the top of the list
+      T.unshift({ id: 999, addr: 'Fresh', n: 'Fresh', c: '#0a84ff', t: '9:38', d: Date.now(), u: true, m: [{ x: 'hello' }] });
+      const t1 = performance.now();
+      renderRows();
+      const patch = performance.now() - t1;
+      return {
+        full, patch,
+        kept: first.isConnected,
+        n: document.querySelectorAll('#rows .row').length,
+        idx: [...document.querySelectorAll('#rows .row')].every((e, i) => e.dataset.i === '' + i)
+      };
+    });
+    console.log('         300-row list: full ' + r.full.toFixed(1) + 'ms, one arrival ' + r.patch.toFixed(1) + 'ms');
+    assert(r.n === 301, 'wrong row count: ' + r.n);
+    assert(r.kept, 'the whole list was thrown away for one new row');
+    assert(r.idx, 'data-i did not follow the rows');
+    assert(r.patch * 2 < r.full, 'patching one row was not much cheaper than rebuilding: ' + r.patch.toFixed(1) + ' vs ' + r.full.toFixed(1));
     await p.context().close();
   });
 
