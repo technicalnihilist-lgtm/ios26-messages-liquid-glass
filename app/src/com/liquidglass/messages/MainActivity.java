@@ -775,17 +775,24 @@ public class MainActivity extends Activity {
         // conversation quadratic (and it runs on the JS bridge thread, with the
         // page blocked waiting for deleteThread to return)
         List<String[]> rows = new ArrayList<>();
+        Cursor c = null;
         try {
-            Cursor c = getContentResolver().query(Telephony.Sms.CONTENT_URI,
+            c = getContentResolver().query(Telephony.Sms.CONTENT_URI,
                     new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE},
                     Telephony.Sms.THREAD_ID + "=?", new String[]{String.valueOf(threadId)}, null);
             if (c != null) {
                 while (c.moveToNext()) {
                     rows.add(new String[]{c.getString(0), c.getString(1), String.valueOf(c.getLong(2))});
                 }
-                c.close();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            // close() used to sit inside the try: a provider that threw between
+            // the query and the read leaked the cursor, and this runs for every
+            // deleted conversation. deleteMessage() and addrForThread() were
+            // already fixed this way; this one was missed.
+        } finally {
+            if (c != null) try { c.close(); } catch (Exception ignored) {}
+        }
         try {
             JSONArray local = LocalStore.forAddressLike(this, addr);
             for (int i = 0; i < local.length(); i++) {

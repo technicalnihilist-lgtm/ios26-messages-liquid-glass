@@ -292,19 +292,26 @@ function makeRow(html){const w=document.createElement('div');w.innerHTML=html;re
    store one incoming text cost ~14 ms of parse (measured) for one inserted row,
    and it threw away every node, its press state and any animation on it. The
    markup written here is the same string the full path used to write; only the
-   nodes that really differ are created, and data-i is patched onto the rest. */
-function patchRows(want){
+   nodes that really differ are created, and data-i is patched onto the rest.
+
+   data-i is the row's index in T, not its position on screen: with a search
+   filter active the two differ, and every reader of data-i (the tap handler and
+   the row long-press) looks the conversation up as T[data-i]. Stamping the
+   on-screen position there made a tap on the third match open - and a long-press
+   on it delete - whatever conversation happened to sit at index 2 of the full
+   list. The wanted index therefore travels beside the wanted markup. */
+function patchRows(want,idx){
  const box=$('#rows');let node=box.firstElementChild,i=0;
  while(i<want.length){
-  const w=want[i];
-  if(node&&node.__rh===w){if(node.dataset.i!==''+i)node.dataset.i=i;node=node.nextElementSibling;i++;continue}
+  const w=want[i],di=''+idx[i];
+  if(node&&node.__rh===w){if(node.dataset.i!==di)node.dataset.i=di;node=node.nextElementSibling;i++;continue}
   /* the wanted row may already exist further down (one conversation was
      removed or moved): drop what is above it and keep the node */
   let scan=node;while(scan&&scan.__rh!==w)scan=scan.nextElementSibling;
   if(scan){while(node!==scan){const nx=node.nextElementSibling;node.remove();node=nx}
-   if(node.dataset.i!==''+i)node.dataset.i=i;node=node.nextElementSibling;i++;continue}
+   if(node.dataset.i!==di)node.dataset.i=di;node=node.nextElementSibling;i++;continue}
   const el=makeRow(w);if(!el)break;
-  el.__rh=w;el.dataset.i=i;box.insertBefore(el,node);i++}
+  el.__rh=w;el.dataset.i=di;box.insertBefore(el,node);i++}
  while(node){const nx=node.nextElementSibling;node.remove();node=nx}
 }
 function renderRows(){
@@ -320,10 +327,10 @@ function renderRows(){
     and then run esc() + ini() + the name hash again for every match on every
     keystroke. A row's markup only changes when its own fields do, so it is
     built once and reused until something about that conversation moves. */
- const out=[],ids=[];
+ const out=[],ids=[],idx=[];
  for(let i=0;i<T.length;i++){const t=T[i];
   if(q&&t.n.toLowerCase().indexOf(q)<0)continue;
-  out.push(rowHtml(t));ids.push(t.id+'\u0000'+t.addr)}
+  out.push(rowHtml(t));ids.push(i+'\u0000'+t.id+'\u0000'+t.addr);idx.push(i)}
  /* the empty state is part of the compared markup: with it left out, the very
     first render on an empty store matched the initial '' and never drew it */
  const html=out.join('')||EMPTY_ROWS,idSig=ids.join('\u0001');
@@ -331,11 +338,15 @@ function renderRows(){
     threw away every row node and every animation on it for nothing. The identity
     list is part of the comparison: two conversations can produce byte-identical
     markup (same name, same snippet, same minute), and then only data-i tells them
-    apart - that still has to be rewritten. */
+    apart - that still has to be rewritten. The index is in that signature too, so
+    a change that moves a row without changing what it says (a conversation that
+    does not match the filter being deleted above it) still reaches patchRows and
+    re-stamps it; without it the row kept pointing at the conversation that used
+    to sit there. */
  if(html===rowsHtml&&idSig===rowsIds)return;
  rowsHtml=html;rowsIds=idSig;
  if(!out.length){$('#rows').innerHTML=EMPTY_ROWS;return}
- patchRows(out)}
+ patchRows(out,idx)}
 /* an empty conversation has no message to take a date from: use the thread's
    own date, not the clock, or the stamp changes every time the page opens */
 function stampFor(t){const m=(t.m&&t.m[0])||null,ms=(m&&m.d)||t.d||Date.now(),d=new Date(ms),n=new Date();
@@ -434,10 +445,19 @@ function openThread(i){const t0=T[i];if(!t0)return;const prev=cur;cur=i;t0.u=fal
   $('#list').style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;
   $('#list').style.transform='translateX(-25%)'}}
 function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
+/* Sending used to repaint the whole conversation: renderThread() with no
+   keepScroll takes the full innerHTML path, which on a 300-message thread is
+   ~34 ms of parse (measured) to add one bubble at the end. A send only ever
+   appends, so the append-only path writes byte-for-byte the same markup for a
+   fraction of the cost - and the scroll still lands at the bottom, which is
+   where the full rebuild left it. A thread that is mid-typing bubble, or one
+   whose on-screen list does not match the model, still falls back to the full
+   rebuild inside renderThread. */
+function appendSent(){renderThread(true);const s=$('#tscroll');if(s)s.scrollTop=s.scrollHeight}
 function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];if(!t)return;
  if(BR){
   if(!BR.hasSmsPermission()){BR.requestSmsPermission();return}
-  t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
+  t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';appendSent();
   const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
   /* a refused send (no radio, invalid address, provider exception) returned
      false and we kept the bubble anyway: the text looked delivered, it had
@@ -449,7 +469,7 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
    renderThread();return}
   setTimeout(()=>{loadThreads();refreshThread();renderRows()},900);
   return}
- t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';renderThread();
+ t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';appendSent();
  /* scoped to #msgs: the long-press menu's floating copy keeps the .bub.me class
     and lives later in the document, so an unscoped .pop() animated the ghost
     instead of the bubble that had just been written */

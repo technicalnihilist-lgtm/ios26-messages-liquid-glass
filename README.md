@@ -97,7 +97,7 @@ If you like our work, you can support us with a donation. We are bringing this v
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.17 (versionCode 22) |
+| Version | 2.18 (versionCode 23) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~81 KB |
@@ -215,7 +215,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 59 behavioural checks
+node tests/ui-tests.js            # 63 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -231,10 +231,69 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. A store query that throws must leave the conversation list and the open chat exactly as they were (an empty *result* is still empty; a *failure* is not), and a conversation arriving at the top must patch the list rather than rebuild it — the rows below have to be moved, not re-created, `data-i` has to follow them, and a tap on a moved row must still open its own chat. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. A store query that throws must leave the conversation list and the open chat exactly as they were (an empty *result* is still empty; a *failure* is not), and a conversation arriving at the top must patch the list rather than rebuild it — the rows below have to be moved, not re-created, `data-i` has to follow them, and a tap on a moved row must still open its own chat. A row on screen must also carry the conversation's index in the full list, not its position among the matches: with a search filter active, a tap on the third match has to open that match (and a long-press on it has to delete that match), and the rows have to be re-pointed when a conversation above them is deleted. Sending a text must append it, not repaint the conversation. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring>[,<substring>] node tests/ui-tests.js` runs just the matching
 tests.
+
+## What's new in 2.18 — the row that opened somebody else's chat
+
+**Fixed**
+
+- **Searching, then tapping a result opened the wrong conversation.** Since 2.17 the
+  list is patched in place and each row carries `data-i`, the index a tap uses to find
+  its conversation. That index was written as the row's position *among the matches*
+  rather than its position in the full conversation list, and the two only agree when
+  the search box is empty. Type `a` in a four-chat inbox where the third match is
+  *Zoya*, tap it, and *Mom* opened. The index now travels beside the markup, so a row
+  always points at the conversation it is showing.
+- **…and long-pressing a result deleted the wrong conversation.** Same cause, worse
+  outcome: the row menu looks its target up the same way, so deleting the third match
+  removed whatever conversation sat at index 2. Filtered rows are the only place this
+  could happen, which is why every unfiltered check passed.
+- **A filtered row could keep pointing at a conversation that had moved.** The
+  patched-list shortcut compares the markup it would write with the markup already on
+  screen and does nothing when they match — but a row can move without a single
+  character of it changing (a conversation above it, one that does not match the
+  filter, is deleted). The comparison now includes the index, so those rows are
+  re-pointed instead of silently going stale.
+- **Deleting a conversation could leak a database cursor.** `tombstoneThread()` closed
+  its cursor inside the `try`, so a provider that threw between the query and the read
+  left it open — once per deleted conversation, on a phone where the SMS provider is
+  already unhappy. `deleteMessage()` and `addrForThread()` were fixed this way years
+  ago; this one was missed. It closes in a `finally` now.
+
+**Optimised**
+
+- **Sending no longer repaints the whole conversation.** `sendMsg()` called
+  `renderThread()` with no `keepScroll`, which takes the full `innerHTML` path: on a
+  300-message thread that is **~34 ms** of parse (measured) to add one bubble at the
+  end, and it throws away every node in the chat — its depth pose, its press state, any
+  animation on it. A send only ever appends, so it takes the append-only path that
+  incoming texts have used since 2.16: **2.8 ms**, 12× less, and the nodes already on
+  screen survive. The markup is byte-for-byte what the full rebuild writes (asserted by
+  the harness), the thread still lands scrolled to the bottom, and anything the append
+  path cannot prove is a pure append — a typing bubble, a model that does not match the
+  screen — still falls back to the full rebuild.
+
+**Harness**
+
+- Four new checks, **63** in total: a filtered row must open the conversation it shows,
+  a long-press on a filtered row must delete that conversation, rows must be re-pointed
+  when a conversation above them is deleted, and a send must append rather than repaint
+  (the nodes on screen have to survive, `data-i` has to stay in step, the markup has to
+  match a full rebuild, and the thread has to end up at the bottom). All four fail on
+  2.17.
+
+**Unchanged on purpose** — all 14 screenshots re-render to the same PNGs byte for byte,
+so the UI, layout, colours, fonts, glass and depth pass are untouched. Still open, each
+waiting on your call: `will-change` on every bubble (it cannot be dropped without
+touching the base `translate3d` that gives bubbles their layer, which is the 3D design),
+a very long conversation still painted in full the first time it opens, the thread
+screen that stays up after an *empty* provider read, the wallpaper-blob half of the
+parallax that the CSS parser still discards, and the signing key (still not in the
+repository, so this APK will not install over 2.17 in place — uninstall the old build
+first).
 
 ## What's new in 2.17 — the list that rebuilt itself for one row
 

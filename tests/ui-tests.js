@@ -1021,6 +1021,86 @@ async function threadSettled(p) {
     await p.context().close();
   });
 
+  /* A filtered row is the Nth match, not the Nth conversation. data-i has to
+     carry the row's index in T, because that is how a tap and a row long-press
+     look the conversation up - stamping the on-screen position there opened (and
+     deleted) whatever conversation happened to sit at that index instead. */
+  const FOUR = {
+    threads: [
+      { id: 11, addr: 'Aanya', snippet: 'one', date: T938, unread: 0 },
+      { id: 12, addr: 'Rohan', snippet: 'two', date: T938 - 1000, unread: 0 },
+      { id: 13, addr: 'Mom', snippet: 'three', date: T938 - 2000, unread: 0 },
+      { id: 14, addr: 'Zoya', snippet: 'four', date: T938 - 3000, unread: 0 }
+    ],
+    msgs: {
+      Aanya: [{ id: 1, body: 'one', date: T938, out: 0 }],
+      Rohan: [{ id: 2, body: 'two', date: T938 - 1000, out: 0 }],
+      Mom: [{ id: 3, body: 'three', date: T938 - 2000, out: 0 }],
+      Zoya: [{ id: 4, body: 'four', date: T938 - 3000, out: 0 }]
+    }
+  };
+
+  await test('a filtered row opens the conversation it shows', async () => {
+    const p = await open(null, FOUR);
+    await p.fill('#q', 'a');            // Aanya, Rohan, Zoya - not Mom
+    await p.waitForTimeout(300);
+    const r = await p.evaluate(() => [...document.querySelectorAll('#rows .row')]
+      .map(e => ({ i: e.dataset.i, n: e.querySelector('.rt b').firstChild.textContent })));
+    assert(r.length === 3, 'filter kept the wrong number of rows: ' + JSON.stringify(r));
+    assert(r.map(x => x.n).join(',') === 'Aanya,Rohan,Zoya', 'wrong rows: ' + JSON.stringify(r));
+    assert(r.map(x => x.i).join(',') === '0,1,3',
+      'data-i is the on-screen position, not the conversation index: ' + JSON.stringify(r.map(x => x.i)));
+    await p.click('#rows .row[data-i="3"]');
+    await threadSettled(p);
+    const addr = await p.evaluate(() => cur !== null && T[cur].addr);
+    assert(addr === 'Zoya', 'tapping the third match opened ' + addr);
+    await p.context().close();
+  });
+
+  await test('a filtered row deletes the conversation it shows', async () => {
+    const p = await open(null, FOUR);
+    await p.fill('#q', 'a');
+    await p.waitForTimeout(300);
+    const box = await p.$eval('#rows .row[data-i="3"]', el => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(600);
+    await p.mouse.up();
+    await p.waitForTimeout(400);
+    assert(await p.$eval('#ctx', el => el.classList.contains('on')), 'row menu did not open');
+    await p.click('#ctx .ci[data-a="del"]');
+    await p.waitForTimeout(1600);
+    const calls = await p.evaluate(() => window.__mockCalls('deleteThread'));
+    assert(calls.length === 1, 'deleteThread never called: ' + JSON.stringify(calls));
+    assert(calls[0][2] === 'Zoya', 'deleted the wrong conversation: ' + JSON.stringify(calls[0]));
+    const left = await p.evaluate(() => T.map(t => t.addr));
+    assert(left.indexOf('Zoya') < 0 && left.indexOf('Mom') >= 0,
+      'wrong conversation removed: ' + JSON.stringify(left));
+    await p.context().close();
+  });
+
+  await test('a filtered list re-points its rows when one above is deleted', async () => {
+    const p = await open(null, FOUR);
+    await p.fill('#q', 'a');            // Aanya, Rohan, Zoya
+    await p.waitForTimeout(300);
+    // Aanya is deleted; the rows below move up and Zoya is now index 2 in T
+    await p.evaluate(() => { T.splice(0, 1); renderRows(); });
+    await p.waitForTimeout(200);
+    const r = await p.evaluate(() => [...document.querySelectorAll('#rows .row')]
+      .map(e => ({ i: e.dataset.i, n: e.querySelector('.rt b').firstChild.textContent })));
+    assert(r.map(x => x.n).join(',') === 'Rohan,Zoya', 'rows changed: ' + JSON.stringify(r));
+    assert(r.map(x => x.i).join(',') === '0,2',
+      'the row kept the index of the conversation that used to sit there: ' + JSON.stringify(r.map(x => x.i)));
+    await p.click('#rows .row[data-i="2"]');
+    await threadSettled(p);
+    const addr = await p.evaluate(() => cur !== null && T[cur].addr);
+    assert(addr === 'Zoya', 'tapping the re-pointed row opened ' + addr);
+    await p.context().close();
+  });
+
   await test('compose creates a new conversation', async () => {
     const p = await open();
     await p.click('#compose');
@@ -1099,6 +1179,39 @@ async function threadSettled(p) {
     assert(r.texts.length === 41 && r.texts[40] === 'one more', 'the new text did not land: ' + r.texts.length);
     assert(r.idx.every((v, i) => v === i), 'data-i went out of step: ' + JSON.stringify(r.idx.slice(-3)));
     assert(r.same, 'the appended markup differs from a full rebuild');
+    await p.context().close();
+  });
+
+  await test('sending appends to the open thread instead of repainting it', async () => {
+    const many = [];
+    for (let i = 0; i < 60; i++) many.push({ id: 100 + i, body: 'line ' + i, date: T938 + i * 60000, out: i % 2 });
+    const p = await open(null, {
+      threads: [{ id: 11, addr: 'Aanya', snippet: 'line 59', date: T938 + 59 * 60000, unread: 0 }],
+      msgs: { Aanya: many }
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    await p.evaluate(() => { document.querySelector('#msgs .bub').__mark = 'kept'; });
+    await p.fill('#txt', 'sent from the harness');
+    await p.click('#send');
+    await p.waitForTimeout(300);
+    const r = await p.evaluate(() => {
+      const kept = document.querySelector('#msgs .bub').__mark || '';
+      const shape = () => [...document.querySelectorAll('#msgs *')].map(e => e.className + '|' + (e.dataset.i || '') + '|' + e.textContent);
+      const texts = [...document.querySelectorAll('#msgs .bub')].map(e => e.textContent.trim());
+      const idx = [...document.querySelectorAll('#msgs .bub')].map(e => +e.dataset.i);
+      const sc = document.querySelector('#tscroll');
+      const atBottom = (sc.scrollHeight - sc.scrollTop - sc.clientHeight) < 4;
+      const asAppended = shape();
+      renderThread();
+      return { kept, texts, idx, atBottom, same: JSON.stringify(shape()) === JSON.stringify(asAppended) };
+    });
+    assert(r.kept === 'kept', 'the whole thread was repainted to add one sent bubble');
+    assert(r.texts.length === 61 && r.texts[60] === 'sent from the harness',
+      'the sent text did not land at the end: ' + JSON.stringify(r.texts.slice(-2)));
+    assert(r.idx.every((v, i) => v === i), 'data-i went out of step: ' + JSON.stringify(r.idx.slice(-3)));
+    assert(r.same, 'the appended markup differs from a full rebuild');
+    assert(r.atBottom, 'the thread did not scroll to the sent bubble');
     await p.context().close();
   });
 
