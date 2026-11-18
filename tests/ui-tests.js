@@ -1395,6 +1395,144 @@ async function threadSettled(p) {
     await p.context().close();
   });
 
+  console.log('\n— 2.19: press, scrim, menu and rotate —');
+  await test('a second finger releases the first, nothing stays shrunk', async () => {
+    const p = await open();
+    const r = await p.evaluate(() => {
+      const rows = document.querySelectorAll('#rows .row');
+      const a = rows[0], b = rows[1];
+      const down = (el, id) => el.dispatchEvent(new PointerEvent('pointerdown',
+        { bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: id === 1 }));
+      const up = id => document.dispatchEvent(new PointerEvent('pointerup',
+        { bubbles: true, pointerId: id, pointerType: 'touch' }));
+      down(a, 1);
+      const aPressed = a.style.transform;
+      down(b, 2);
+      up(2); up(1);
+      return { aPressed, a: a.style.transform, b: b.style.transform };
+    });
+    assert(/scale\(/.test(r.aPressed), 'the first press did not scale its row: ' + JSON.stringify(r));
+    assert(r.a === '', 'the first row was left shrunk after the second finger: ' + JSON.stringify(r));
+    assert(r.b === '', 'the second row was left shrunk: ' + JSON.stringify(r));
+    await p.context().close();
+  });
+
+  await test('an sms: link while a bubble menu is open leaves no scrim behind', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    const box = await p.$$eval('#msgs .bub', els => {
+      const r = els[0].getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(600);
+    await p.mouse.up();
+    await p.waitForTimeout(250);
+    assert(await p.evaluate(() => X.g !== null), 'the menu did not open');
+    await p.evaluate(() => window.__composeTo('Rohan'));
+    await p.waitForTimeout(500);
+    const st = await p.evaluate(() => ({
+      menu: document.querySelector('#ctx').classList.contains('on'),
+      ghost: document.querySelectorAll('#app > .bub').length,
+      scrim: document.querySelector('#scrim').classList.contains('on'),
+      bubbles: document.querySelectorAll('#msgs .bub').length
+    }));
+    assert(!st.menu, 'the menu is still up over the new chat: ' + JSON.stringify(st));
+    assert(st.ghost === 0, 'the floating copy of the bubble was left behind: ' + JSON.stringify(st));
+    assert(!st.scrim, 'the scrim was left up, eating every tap: ' + JSON.stringify(st));
+    assert(st.bubbles === 1, 'the new chat did not draw: ' + JSON.stringify(st));
+    await p.context().close();
+  });
+
+  await test('a chat deleted elsewhere while its menu is open unwinds the menu too', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    const box = await p.$$eval('#msgs .bub', els => {
+      const r = els[0].getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(600);
+    await p.mouse.up();
+    await p.waitForTimeout(250);
+    assert(await p.evaluate(() => X.g !== null), 'the menu did not open');
+    const st = await p.evaluate(async () => {
+      window.__mock.threads = window.__mock.threads.filter(t => t.id !== 11);
+      delete window.__mock.msgs['Aanya'];
+      window.__onSmsPoll();
+      await new Promise(r => setTimeout(r, 500));
+      return {
+        cur,
+        menu: document.querySelector('#ctx').classList.contains('on'),
+        ghost: document.querySelectorAll('#app > .bub').length,
+        scrim: document.querySelector('#scrim').classList.contains('on'),
+        rows: document.querySelectorAll('#rows .row').length
+      };
+    });
+    assert(st.cur === null, 'the thread screen did not unwind: ' + JSON.stringify(st));
+    assert(!st.menu, 'the menu was left floating over the list: ' + JSON.stringify(st));
+    assert(st.ghost === 0, 'the floating copy was left behind: ' + JSON.stringify(st));
+    assert(!st.scrim, 'the scrim was left up: ' + JSON.stringify(st));
+    await p.context().close();
+  });
+
+  await test('sending from the keyboard while a menu is open still shows the bubble', async () => {
+    const p = await open();
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    const box = await p.$$eval('#msgs .bub', els => {
+      const r = els[0].getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await p.mouse.move(box.x, box.y);
+    await p.mouse.down();
+    await p.waitForTimeout(600);
+    await p.mouse.up();
+    await p.waitForTimeout(250);
+    assert(await p.evaluate(() => X.g !== null), 'the menu did not open');
+    const st = await p.evaluate(async () => {
+      const inp = document.querySelector('#txt');
+      inp.value = 'typed while the menu was up';
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise(r => setTimeout(r, 400));
+      return {
+        sent: window.__mockCalls('sendSms').length,
+        field: inp.value,
+        bubbles: [...document.querySelectorAll('#msgs .bub')].map(e => e.textContent.trim()),
+        scrim: document.querySelector('#scrim').classList.contains('on')
+      };
+    });
+    assert(st.sent === 1, 'the text was not sent: ' + JSON.stringify(st));
+    assert(st.bubbles.indexOf('typed while the menu was up') >= 0,
+      'the sent bubble never appeared: ' + JSON.stringify(st));
+    assert(st.field === '', 'the field was not cleared: ' + JSON.stringify(st));
+    assert(!st.scrim, 'the scrim was left up: ' + JSON.stringify(st));
+    await p.context().close();
+  });
+
+  await test('rotating re-poses the depth for the new viewport', async () => {
+    const p = await open(null, {
+      threads: [{ id: 11, addr: 'Aanya', snippet: 'hi', date: T938, unread: 0 }],
+      msgs: { Aanya: MSGS_AANYA }
+    });
+    await p.click('#rows .row[data-i="0"]');
+    await threadSettled(p);
+    await p.waitForTimeout(200);
+    const before = await p.$$eval('#msgs .bub', els => els.map(e => e.style.getPropertyValue('--bz')));
+    await p.setViewportSize({ width: 900, height: 430 });
+    await p.waitForTimeout(500);
+    const after = await p.$$eval('#msgs .bub', els => els.map(e => e.style.getPropertyValue('--bz')));
+    assert(JSON.stringify(before) !== JSON.stringify(after),
+      'the depth poses were not recomputed for the new viewport: ' + JSON.stringify(before) + ' -> ' + JSON.stringify(after));
+    assert(after.every(v => /px$/.test(v)), 'a pose went missing on rotate: ' + JSON.stringify(after));
+    await p.context().close();
+  });
+
+
   if (liveBrowser && liveBrowser.isConnected()) await liveBrowser.close();
 
   console.log('\n' + '='.repeat(52));

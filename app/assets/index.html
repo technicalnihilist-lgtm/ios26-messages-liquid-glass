@@ -444,7 +444,12 @@ function openThread(i){const t0=T[i];if(!t0)return;const prev=cur;cur=i;t0.u=fal
   // the list has to move on the same curve as the thread it is making room for
   $('#list').style.transition=`transform calc(var(--dur) + .15s) ${S.on?'var(--ease)':'ease'}`;
   $('#list').style.transform='translateX(-25%)'}}
-function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;renderRows()}
+function backThread(){const th=$('#thread');th.style.transition=`transform .45s ${S.on?'var(--ease)':'ease'}`;th.style.transform='translateX(100%)';$('#list').style.transform='translateX(0)';cur=null;
+ /* this also runs when a poll finds the open conversation deleted in another
+    app. If its long-press menu was up at that moment, the menu, its floating
+    copy and the scrim were left hovering over the conversation list for good. */
+ if(X.g){closeCtx();$('#scrim').classList.remove('on')}
+ renderRows()}
 /* Sending used to repaint the whole conversation: renderThread() with no
    keepScroll takes the full innerHTML path, which on a 300-message thread is
    ~34 ms of parse (measured) to add one bubble at the end. A send only ever
@@ -455,10 +460,15 @@ function backThread(){const th=$('#thread');th.style.transition=`transform .45s 
    rebuild inside renderThread. */
 function appendSent(){renderThread(true);const s=$('#tscroll');if(s)s.scrollTop=s.scrollHeight}
 function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const t=T[cur];if(!t)return;
+ /* the keyboard's send key still works while a long-press menu is open (the
+    scrim only covers the page), and renderThread() defers behind that menu: the
+    text went out over the bridge, the field was cleared, and no bubble appeared
+    until the menu was dismissed. Dismiss it first so the send can paint. */
+ if(X.g){closeCtx();$('#scrim').classList.remove('on')}
  if(BR){
   if(!BR.hasSmsPermission()){BR.requestSmsPermission();return}
   t.m.push({f:1,x:v});t.t='Now';$('#txt').value='';appendSent();
-  const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
+  const bl=document.querySelectorAll('#msgs .bub.me'),b=bl[bl.length-1];if(b)pop(b);
   /* a refused send (no radio, invalid address, provider exception) returned
      false and we kept the bubble anyway: the text looked delivered, it had
      been cleared from the field, and there was no way to send it again */
@@ -473,9 +483,9 @@ function sendMsg(){const v=$('#txt').value.trim();if(!v||cur===null)return;const
  /* scoped to #msgs: the long-press menu's floating copy keeps the .bub.me class
     and lives later in the document, so an unscoped .pop() animated the ghost
     instead of the bubble that had just been written */
- const b=[...document.querySelectorAll('#msgs .bub.me')].pop();if(b)pop(b);
+ const bl=document.querySelectorAll('#msgs .bub.me'),b=bl[bl.length-1];if(b)pop(b);
  const ci=cur;t.typing=true;setTimeout(()=>{if(cur===ci){renderThread();const e=[...document.querySelectorAll('#msgs .typing')].pop();e&&pop(e)}},500);
- setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const b=[...document.querySelectorAll('#msgs .bub.th')].pop();b&&pop(b)}else t.u=true;renderRows()},1800)}
+ setTimeout(()=>{t.typing=false;t.m.push({f:0,x:replies[Math.random()*replies.length|0]});if(cur===ci){renderThread();const bl=document.querySelectorAll('#msgs .bub.th'),b=bl[bl.length-1];b&&pop(b)}else t.u=true;renderRows()},1800)}
 /* A close animation outlives the sheet it is closing. Tapping Done and then the
    gear again inside those ~400ms opened the sheet and the *old* exit animation
    finished a moment later and took .on straight back off it: the sheet vanished
@@ -493,7 +503,11 @@ function closeSheets(){const gen=++sheetGen;
 // press bounce on everything touchable
 let pr=null;
 const SEL='button,.ci,.row,.bub,.av,.search,.field,.sheet .ctl input,.cont,.dock,.sw';
-document.addEventListener('pointerdown',e=>{const el=e.target.closest(SEL);if(!el||el.type==='range'||!S.on)return;pr=el;
+document.addEventListener('pointerdown',e=>{const el=e.target.closest(SEL);if(!el||el.type==='range'||!S.on)return;
+ // a second finger overwrote `pr` without releasing the first, and whatever the
+ // first one was pressing stayed shrunk to --pd for the rest of the session
+ if(pr&&pr!==el)rel();
+ pr=el;
  const pd=getComputedStyle(R).getPropertyValue('--pd').trim();
  // a bubble already carries the depth transform, so press it through a var: an inline
  // transform would throw the 3D pose away for as long as the finger is down
@@ -586,7 +600,10 @@ function parCache(){if(parBlobs)return;parBlobs=[...document.querySelectorAll('.
  parPhone=document.querySelector('.phone');
  parBlobLive=parBlobs.length&&parBlobs.every(b=>{const a=getComputedStyle(b).animationName;return !a||a==='none'})?1:0;
  try{barShiftOk=(window.CSS&&CSS.supports&&CSS.supports('transform','translate3d(1px,1px,0'))?1:0}catch(e){barShiftOk=1}}
-addEventListener('resize',()=>{parPhoneRect=null;geoReset()},{passive:true});
+/* a rotate/resize changes the scrollport the depth is measured against, and the
+   geometry cache was cleared without ever re-posing: every bubble kept the pose
+   it was given for the old viewport height until the reader scrolled again */
+addEventListener('resize',()=>{parPhoneRect=null;geoReset();queueDepth()},{passive:true});
 // NOTE: the bar/blob parallax below is written exactly as it was approved.
 // Measured in the browser: the CSS parser closes the bar string's missing paren,
 // so the two bars DO slide with the pointer and the gyroscope (the value lands as
@@ -990,7 +1007,10 @@ window.__composeTo=function(addr){if(!addr)return;
     settings sheet, a long-press menu or the whole app can still be closed, and
     openThread() only slides the thread in: the chat used to open behind the
     springboard (app not shown at all) or behind a sheet nobody dismissed. */
- try{if(X.g)closeCtx();if(document.querySelector('.sheet.on'))closeSheets()}catch(e){}
+ /* closeSheets() also clears the scrim. Closing the menu with closeCtx() alone
+    left the scrim up: the chat opened behind a dimmed, tap-swallowing overlay
+    until the user tapped it away. */
+ try{if(X.g||document.querySelector('.sheet.on'))closeSheets()}catch(e){}
  if(!$('#app').classList.contains('on'))openApp();
  const k=findThread(addr,0);
  if(k>=0)openThread(k);else newChat(addr)};

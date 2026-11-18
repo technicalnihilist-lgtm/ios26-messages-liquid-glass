@@ -150,6 +150,22 @@ final class LocalStore {
         try {
             SharedPreferences p = prefs(ctx);
             JSONArray arr = new JSONArray(p.getString(DELETED, "[]"));
+            // the dedupe used to re-scan the whole tombstone array for every row:
+            // deleting a 500-message conversation against a full 3000-entry store
+            // was 1.5 million JSON reads, on the JS bridge thread, with the page
+            // blocked waiting for the call. Index it once, like delIndex() does.
+            Map<String, List<Long>> have = new HashMap<>();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String k = o.optString("addr") + '\u0000' + o.optString("body");
+                List<Long> dates = have.get(k);
+                if (dates == null) {
+                    dates = new ArrayList<>();
+                    have.put(k, dates);
+                }
+                dates.add(o.optLong("date"));
+            }
             boolean changed = false;
             for (int r = 0; r < rows.size(); r++) {
                 String[] row = rows.get(r);
@@ -163,7 +179,17 @@ final class LocalStore {
                 } catch (Exception e) {
                     continue;
                 }
-                if (alreadyTombstoned(arr, addr, body, when)) continue;
+                String key = addr + '\u0000' + body;
+                List<Long> dates = have.get(key);
+                boolean dup = false;
+                if (dates != null) {
+                    for (int d = 0; d < dates.size(); d++) {
+                        if (Math.abs(when - dates.get(d)) < DEL_MS) { dup = true; break; }
+                    }
+                }
+                if (dup) continue;
+                if (dates == null) { dates = new ArrayList<>(); have.put(key, dates); }
+                dates.add(when);
                 JSONObject o = new JSONObject();
                 o.put("addr", addr);
                 o.put("body", body);

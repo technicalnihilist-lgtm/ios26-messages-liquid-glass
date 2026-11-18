@@ -431,7 +431,11 @@ public class MainActivity extends Activity {
                 int scanned = 0;
                 while (c.moveToNext() && seen.size() < 300 && scanned++ < 5000) {
                     long threadId = c.getLong(1);
-                    boolean unreadRow = c.getInt(6) == 0;
+                    // only an *incoming* row can be unread. Outbox/queued/failed rows
+                    // and anything another app left with READ=0 on the outgoing side
+                    // used to put an unread dot on your own message.
+                    boolean unreadRow = c.getInt(6) == 0
+                            && c.getInt(5) == Telephony.Sms.MESSAGE_TYPE_INBOX;
                     if (seen.containsKey(threadId)) {
                         // only the newest row of a thread used to be inspected, so a
                         // conversation whose latest text was read but which still had

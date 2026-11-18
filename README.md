@@ -97,7 +97,7 @@ If you like our work, you can support us with a donation. We are bringing this v
 | | |
 |---|---|
 | Package | `com.liquidglass.messages` |
-| Version | 2.18 (versionCode 23) |
+| Version | 2.19 (versionCode 24) |
 | Min Android | 7.0 (API 24) |
 | Target Android | 14 (API 34) |
 | Size | ~81 KB |
@@ -215,7 +215,7 @@ needed.
 
 ```bash
 npm install                       # playwright
-node tests/ui-tests.js            # 63 behavioural checks
+node tests/ui-tests.js            # 68 behavioural checks
 node tests/screenshots.js         # re-renders screenshots/
 ```
 
@@ -231,10 +231,80 @@ changes nothing must repaint nothing, an incoming text must not rebuild the list
 an open conversation menu, and a number the store writes differently — with or without
 its country code — must never close the open chat or clone it. A notification tap must
 open the chat on top of a closed app or an open sheet, typing in the contacts search must
-not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. A store query that throws must leave the conversation list and the open chat exactly as they were (an empty *result* is still empty; a *failure* is not), and a conversation arriving at the top must patch the list rather than rebuild it — the rows below have to be moved, not re-created, `data-i` has to follow them, and a tap on a moved row must still open its own chat. A row on screen must also carry the conversation's index in the full list, not its position among the matches: with a search filter active, a tap on the third match has to open that match (and a long-press on it has to delete that match), and the rows have to be re-pointed when a conversation above them is deleted. Sending a text must append it, not repaint the conversation. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
+not re-query the provider, a send the radio refuses must give the text back, and a sheet reopened inside its own exit animation must stay up (it used to close itself and leave the scrim behind). A store rebuild must keep the open chat's messages (it used to collapse them to the one-line snippet, so a long-press deleted a different text), a chat deleted in another app must unwind instead of stranding the thread screen, and an *empty* store read must not — that is a provider hiccup, not a delete. The row markup cache must not change what is drawn (a new message renumbers every row, and a tap must still open the conversation it points at), and deleting a text and leaving the chat must leave no node behind with `visibility:hidden`. A slider must not turn "follow the phone" into a fixed theme, an incoming text must be appended to the open chat rather than repainted (the nodes already on screen have to survive, and the markup must match a full rebuild), and a text swapped in the *middle* of a conversation — same count, same tail, same snippet — must still reach the screen. A store query that throws must leave the conversation list and the open chat exactly as they were (an empty *result* is still empty; a *failure* is not), and a conversation arriving at the top must patch the list rather than rebuild it — the rows below have to be moved, not re-created, `data-i` has to follow them, and a tap on a moved row must still open its own chat. A row on screen must also carry the conversation's index in the full list, not its position among the matches: with a search filter active, a tap on the third match has to open that match (and a long-press on it has to delete that match), and the rows have to be re-pointed when a conversation above them is deleted. Sending a text must append it, not repaint the conversation. A second finger must release the control the first one was pressing, an `sms:` link or a notification tap over an open bubble menu must leave no scrim behind, a conversation deleted in another app while its menu is open must unwind the menu, its floating copy and the scrim, a keyboard send with a menu open must still draw its bubble, and a rotate must re-pose the depth for the new viewport. Chromium is recycled every 8 contexts, so a small machine does not run out of memory halfway through and kill the last check.
 
 `ONLY=<substring>[,<substring>] node tests/ui-tests.js` runs just the matching
 tests.
+
+## What's new in 2.19 — the menu that would not let go
+
+**Fixed**
+
+- **A second finger left the first control shrunk.** The press bounce keeps the
+  element it is animating in one slot (`pr`) so it can be restored on release. A
+  second finger pressing anything else overwrote that slot without releasing the
+  first element, and the control the first finger had been holding stayed at
+  `scale(0.93)` for the rest of the session — a slightly smaller row, button or
+  bubble that never came back. A new press now releases the previous one first.
+  Two thumbs resting on the inbox while you tap a chat is enough to hit this.
+- **A notification tap left the screen dimmed and unresponsive.** `__composeTo()`
+  (the notification tap and the `sms:` link) dismissed an open long-press menu with
+  `closeCtx()` — which removes the menu and its floating copy but not the scrim.
+  The scrim stayed at `opacity:1` with `pointer-events:auto`, so the chat you were
+  taken to sat under a dark overlay that swallowed every tap until you tapped the
+  overlay itself. It now goes through `closeSheets()`, which is what already
+  clears the scrim for the sheet path.
+- **A chat deleted in another app stranded its menu over the inbox.** A poll that
+  finds the open conversation gone calls `backThread()` — which slid the thread
+  away and left the long-press menu, its floating bubble copy and the scrim
+  hovering over the conversation list. `backThread()` now unwinds the menu too.
+- **Sending from the keyboard while a menu was open lost the bubble.** The scrim
+  only covers the page, not the keyboard, so the IME's send key still fired
+  `sendMsg()` with a menu up — and `renderThread()` deliberately defers behind an
+  open menu. The text went out over the bridge, the field was cleared, and nothing
+  appeared in the conversation until the menu was dismissed. `sendMsg()` now
+  dismisses the menu first so the send can paint.
+- **Rotating the phone left every bubble in the old pose.** The depth engine
+  measures each bubble against the scrollport height, and the resize handler
+  cleared the geometry cache without ever re-posing: after a rotate, every bubble
+  kept the `--bz`/`--by`/opacity it was given for the previous viewport until the
+  reader scrolled. A resize now queues one depth pass.
+- **Your own message could mark a conversation unread.** `threadsJson()` treated
+  any row with `READ=0` as unread, including outgoing rows — an outbox, queued or
+  failed row left `READ=0` by the provider put an unread dot on a conversation
+  whose newest text you had just sent. Only `MESSAGE_TYPE_INBOX` rows count now.
+
+**Optimised**
+
+- **Deleting a long conversation no longer re-scans every tombstone for every
+  message.** `LocalStore.tombstoneAll()` writes the whole tombstone array in one
+  pass, but its duplicate check still walked that array once per message: deleting
+  a 500-message thread against a full 3000-entry store was ~1.5 million JSON
+  reads, on the JS bridge thread, with the page blocked waiting for the call to
+  return. It indexes the existing tombstones once, exactly like `delIndex()` does
+  for reads — O(rows × tombstones) becomes O(rows + tombstones).
+- **Sending allocates less.** Three `[...document.querySelectorAll('#msgs .bub')]`
+  spreads built an array of every bubble in the chat on each send (≈150 nodes on a
+  300-message thread) just to take the last one. The `NodeList` is indexed
+  directly.
+
+**Harness**
+
+- Five new checks, **68** in total: a second finger must release the first, an
+  `sms:` link over an open bubble menu must leave no scrim, a chat deleted
+  elsewhere while its menu is open must unwind the menu, the floating copy *and*
+  the scrim, a keyboard send with a menu open must still show the bubble, and a
+  rotate must re-pose the depth for the new viewport. All five fail on 2.18.
+
+**Unchanged on purpose** — all 14 screenshots re-render to the same PNGs byte for
+byte, so the UI, layout, colours, fonts, glass and depth pass are untouched. Still
+open, each waiting on your call: `will-change` on every bubble (it cannot be
+dropped without touching the base `translate3d` that gives bubbles their layer,
+which is the 3D design), a very long conversation still painted in full the first
+time it opens, the thread screen that stays up after an *empty* provider read, the
+wallpaper-blob half of the parallax that the CSS parser still discards, and the
+signing key (still not in the repository, so this APK will not install over 2.18 in
+place — uninstall the old build first).
 
 ## What's new in 2.18 — the row that opened somebody else's chat
 
