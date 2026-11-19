@@ -1,10 +1,10 @@
 <div align="center">
 
+<img src="assets/icon.png" width="96" height="96" alt="iOS 26 Messages with Apple&#x27;s Liquid Glass aesthetic icon">
+
+<img src="assets/banner.svg" alt="iOS 26 Messages with Apple&#x27;s Liquid Glass aesthetic — rebuilt as a real, installable Android APK.…">
+
 <a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/stargazers"><img src="https://img.shields.io/badge/stars-0-5A31F4?style=for-the-badge&logo=github&logoColor=white" alt="stars: 0"></a>&nbsp;<a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/network/members"><img src="https://img.shields.io/badge/forks-0-3FB950?style=for-the-badge" alt="forks: 0"></a>
-
-<h3>iOS 26 Messages with Apple&#x27;s Liquid Glass aesthetic — rebuilt as a real, installable Android APK.…</h3>
-
-<img src="https://img.shields.io/badge/JavaScript-5865F2?style=flat-square" alt="JavaScript"> <img src="https://img.shields.io/badge/Android-3B3F4A?style=flat-square" alt="Android"> <img src="https://img.shields.io/badge/APK-3FB950?style=flat-square" alt="APK"> <img src="https://img.shields.io/badge/Design-EC4899?style=flat-square" alt="Design">
 
 <a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/releases/latest"><img src="https://img.shields.io/badge/DOWNLOAD-APK-6D5AE6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK"></a>
 
@@ -16,13 +16,7 @@
 
 <a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/releases/latest"><img src="https://img.shields.io/badge/VERSION-v2.19-6D5AE6?style=for-the-badge" alt="VERSION: v2.19"></a> <img src="https://img.shields.io/badge/DOWNLOADS-65-3FB950?style=for-the-badge" alt="DOWNLOADS: 65"> <a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/releases"><img src="https://img.shields.io/badge/RELEASES-GITHUB-EC4899?style=for-the-badge&logo=github&logoColor=white" alt="RELEASES: GITHUB"></a>
 
-<h4>Get it from</h4>
-
-<a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/releases"><img src="https://img.shields.io/badge/GitHub-Releases-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Releases"></a> <a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/archive/refs/heads/main.zip"><img src="https://img.shields.io/badge/Source-ZIP-0EA5E9?style=for-the-badge&logo=github&logoColor=white" alt="Source ZIP"></a>
-
 </div>
-
----
 
 ---
 
