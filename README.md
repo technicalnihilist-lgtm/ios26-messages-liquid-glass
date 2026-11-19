@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="assets/icon.png" width="96" height="96" alt="iOS 26 Messages with Apple&#x27;s Liquid Glass aesthetic icon">
+<img src="assets/icon.png" width="96" height="96" alt="iOS 26 Messages icon">
 
-<img src="assets/banner.svg" alt="iOS 26 Messages with Apple&#x27;s Liquid Glass aesthetic — rebuilt as a real, installable Android APK.…">
+<img src="assets/banner.svg" alt="iOS 26 Messages">
 
 <a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/stargazers"><img src="https://img.shields.io/badge/stars-0-5A31F4?style=for-the-badge&logo=github&logoColor=white" alt="stars: 0"></a>&nbsp;<a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/network/members"><img src="https://img.shields.io/badge/forks-0-3FB950?style=for-the-badge" alt="forks: 0"></a>
 
-<a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/releases/latest"><img src="https://img.shields.io/badge/DOWNLOAD-APK-6D5AE6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK"></a>
+<a href="https://github.com/technicalnihilist-lgtm/ios26-messages-liquid-glass/releases/latest/download/Messages-LiquidGlass.apk"><img src="https://img.shields.io/badge/DOWNLOAD-APK-6D5AE6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK"></a> <a href="https://technicalnihilist-lgtm.github.io/apps-site/apps/ios26-messages-liquid-glass.html"><img src="https://img.shields.io/badge/WEBSITE-OPEN-3B82F6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
 
 <b>Support the work</b>
 
